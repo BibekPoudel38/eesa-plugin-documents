@@ -1,0 +1,27 @@
+{
+  "name": "eesa-plugin-documents",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Eesa Documents plugin — chat-based document management. Each tenant connects their OWN Google Drive; the plugin indexes content (semantic RAG) and NEVER hosts the file bytes. MCP + REST + embedded UI, on Coolify.",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node src/server.js",
+    "check": "node --check src/server.js && node --check src/auth.js && node --check src/db.js && node --check src/mcp.js && node --check src/providers/index.js && node --check src/providers/google_drive.js && node --check src/pipeline.js && node --check src/extract.js && node --check src/embed.js && node --check src/qdrant.js && node --check src/crypto.js"
+  },
+  "dependencies": {
+    "@napi-rs/canvas": "^0.1.65",
+    "@qdrant/js-client-rest": "^1.11.0",
+    "express": "^4.19.2",
+    "fastembed": "^1.14.1",
+    "googleapis": "^144.0.0",
+    "jose": "^5.9.0",
+    "mammoth": "^1.8.0",
+    "multer": "^1.4.5-lts.1",
+    "pdf-parse": "^1.1.1",
+    "pdfjs-dist": "^4.7.76",
+    "pg": "^8.12.0",
+    "tesseract.js": "^5.1.1",
+    "xlsx": "^0.18.5"
+  }
+}

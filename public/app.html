@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Eesa Documents</title>
+<style>
+  :root { color-scheme: light dark; --bg:#0b1020; --card:#151b2e; --line:#26304a; --fg:#e6e9f0; --mut:#9aa4bf; --acc:#4f7cff; --ok:#2fbf71; --warn:#e2b93b; --err:#e5484d; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 20px; }
+  h1 { font-size: 18px; margin: 0 0 2px; }
+  .sub { color: var(--mut); font-size: 13px; margin-bottom: 18px; }
+  .card { background: var(--card); border:1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 14px; }
+  .row { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  button { background: var(--acc); color:#fff; border:0; border-radius:8px; padding:9px 14px; font-size:14px; cursor:pointer; }
+  button.ghost { background: transparent; border:1px solid var(--line); color:var(--fg); }
+  button:disabled { opacity:.5; cursor:default; }
+  .pill { font-size:12px; padding:3px 9px; border-radius:99px; border:1px solid var(--line); }
+  .pill.ok { color:var(--ok); border-color:var(--ok); } .pill.err { color:var(--err); border-color:var(--err); } .pill.warn{ color:var(--warn); border-color:var(--warn);}
+  .stats { display:grid; grid-template-columns: repeat(4,1fr); gap:10px; margin-top:10px; }
+  .stat { text-align:center; } .stat b { font-size:20px; display:block; } .stat span { color:var(--mut); font-size:12px; }
+  input[type=search]{ width:100%; padding:11px 13px; border-radius:9px; border:1px solid var(--line); background:#0e1425; color:var(--fg); font-size:14px; }
+  .hit { border-top:1px solid var(--line); padding:11px 0; } .hit a { color:var(--acc); text-decoration:none; font-weight:600; } .hit p{ color:var(--mut); font-size:13px; margin:4px 0 0; line-height:1.45; }
+  .muted{ color:var(--mut); font-size:13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Eesa Documents</h1>
+  <div class="sub">Connect your Google Drive once — then find any document by meaning, in chat. Your files stay in your Drive.</div>
+
+  <div class="card" id="connCard">
+    <div class="row">
+      <div><b id="connTitle">Google Drive</b><div class="muted" id="connSub">Checking…</div></div>
+      <div class="row" style="gap:8px">
+        <span class="pill" id="connPill">…</span>
+        <button id="connectBtn" style="display:none">Connect Google Drive</button>
+        <button id="syncBtn" class="ghost" style="display:none">Re-sync</button>
+      </div>
+    </div>
+    <div class="stats" id="stats" style="display:none">
+      <div class="stat"><b id="cTotal">0</b><span>files</span></div>
+      <div class="stat"><b id="cIndexed">0</b><span>indexed</span></div>
+      <div class="stat"><b id="cPending">0</b><span>in queue</span></div>
+      <div class="stat"><b id="cError">0</b><span>errors</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <div><b>Add documents</b><div class="muted">Files upload into your “Eesa Documents” Drive folder and index automatically.</div></div>
+      <label class="ghost" id="uploadLabel" style="cursor:pointer;padding:9px 14px;border:1px solid var(--line);border-radius:8px">Upload<input id="file" type="file" multiple style="display:none" /></label>
+    </div>
+    <div class="muted" id="upStatus" style="margin-top:8px"></div>
+  </div>
+
+  <div class="card">
+    <input type="search" id="q" placeholder="Search your documents by meaning — e.g. “Q3 lease renewal”…" />
+    <div id="results"></div>
+  </div>
+</div>
+
+<script>
+// The Eesa shell provides a UI-session token. Accept it from ?t= / #t= or an
+// injected global; the shell can be configured to pass whichever it uses.
+const params = new URLSearchParams(location.search);
+const hash = new URLSearchParams(location.hash.slice(1));
+const TOKEN = params.get('t') || hash.get('t') || window.__EESA_UI_TOKEN__ || '';
+
+async function api(path, opts = {}) {
+  const r = await fetch('/api' + path, {
+    ...opts,
+    headers: { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json', ...(opts.headers || {}) },
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((j.error && (j.error.message || j.error)) || ('HTTP ' + r.status));
+  return j.data ?? j;
+}
+
+const $ = (id) => document.getElementById(id);
+
+async function refresh() {
+  try {
+    const { connection, counts, pending } = await api('/status');
+    const connected = connection && connection.status !== 'disconnected';
+    $('connPill').className = 'pill ' + (connection?.status === 'error' ? 'err' : connection?.status === 'syncing' ? 'warn' : connected ? 'ok' : '');
+    $('connPill').textContent = connection ? connection.status : 'not connected';
+    $('connSub').textContent = connected ? (connection.accountEmail || 'connected') : 'Not connected yet';
+    $('connectBtn').style.display = connected ? 'none' : '';
+    $('syncBtn').style.display = connected ? '' : 'none';
+    $('stats').style.display = connected ? 'grid' : 'none';
+    $('cTotal').textContent = counts.total; $('cIndexed').textContent = counts.indexed;
+    $('cPending').textContent = pending; $('cError').textContent = counts.error;
+  } catch (e) {
+    $('connSub').textContent = 'Could not load status: ' + e.message;
+  }
+}
+
+$('connectBtn').onclick = async () => {
+  try { const { url } = await api('/connect/google/start'); window.open(url, '_blank', 'noopener'); }
+  catch (e) { alert('Connect failed: ' + e.message); }
+};
+$('syncBtn').onclick = async () => { $('syncBtn').disabled = true; try { await api('/sync', { method: 'POST' }); } catch (e) { alert(e.message); } $('syncBtn').disabled = false; refresh(); };
+
+// Upload: raw fetch (FormData sets its own multipart Content-Type — don't force JSON).
+$('file').onchange = async (e) => {
+  const files = [...e.target.files]; e.target.value = '';
+  for (const f of files) {
+    $('upStatus').textContent = `Uploading ${f.name}…`;
+    try {
+      const fd = new FormData(); fd.append('file', f);
+      const r = await fetch('/api/upload', { method: 'POST', headers: { 'Authorization': 'Bearer ' + TOKEN }, body: fd });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((j.error && (j.error.message || j.error)) || ('HTTP ' + r.status));
+      $('upStatus').textContent = `Uploaded ${f.name} ✓ — indexing…`;
+    } catch (err) { $('upStatus').textContent = `Upload failed: ${err.message}`; }
+  }
+  setTimeout(refresh, 1200);
+};
+
+let t;
+$('q').oninput = (e) => {
+  clearTimeout(t);
+  const q = e.target.value.trim();
+  if (!q) { $('results').innerHTML = ''; return; }
+  t = setTimeout(async () => {
+    try {
+      const hits = await api('/search?q=' + encodeURIComponent(q));
+      $('results').innerHTML = hits.length
+        ? hits.map((h) => `<div class="hit"><a href="${h.link}" target="_blank" rel="noopener">${h.title || 'Untitled'}</a><p>${(h.snippet || '').slice(0, 260)}</p></div>`).join('')
+        : '<div class="hit muted">No matches.</div>';
+    } catch (err) { $('results').innerHTML = '<div class="hit muted">' + err.message + '</div>'; }
+  }, 280);
+};
+
+refresh();
+setInterval(refresh, 8000);
+</script>
+</body>
+</html>
