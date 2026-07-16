@@ -7,6 +7,7 @@
   "engines": { "node": ">=20" },
   "scripts": {
     "start": "node src/server.js",
+    "smoke": "node scripts/smoke.js",
     "check": "node --check src/server.js && node --check src/auth.js && node --check src/db.js && node --check src/mcp.js && node --check src/providers/index.js && node --check src/providers/google_drive.js && node --check src/pipeline.js && node --check src/extract.js && node --check src/embed.js && node --check src/qdrant.js && node --check src/crypto.js"
   },
   "dependencies": {
