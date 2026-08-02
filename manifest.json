@@ -4,26 +4,56 @@
   "name": "Eesa Documents",
   "version": "0.1.0",
   "description": "Chat-based document management. Connect your own Google Drive; ask the agent to find the right document by meaning, not filename. Files stay in your cloud — Eesa only indexes their content.",
-  "icon": "https://cdn.eesa.ai/icons/documents.png",
+  "icon": "",
   "hostedBy": "self",
-  "developer": { "name": "Eesa Core", "email": "team@eesa.ai" },
-  "auth": { "verify": "eesa-jwks", "gatewayOnly": true },
-  "scopes": ["documents:read", "documents:write", "documents:admin"],
+  "developer": {
+    "name": "Eesa Core",
+    "email": "team@eesa.ai"
+  },
+  "auth": {
+    "verify": "eesa-jwks",
+    "gatewayOnly": true
+  },
+  "scopes": [
+    "documents:read",
+    "documents:write",
+    "documents:admin"
+  ],
   "surfaces": {
     "mcp": {
       "endpoint": "https://documents.plugins.bibekpoudel.com/mcp",
       "transport": "streamable-http",
       "tools": [
-        {"name": "search_documents", "description": "Find the most relevant documents by MEANING (semantic search over content), not just filename. Returns titles, matching passages, and links back to the file in the workspace's own cloud."},
-        {"name": "list_documents", "description": "List the documents indexed for this workspace (most recent first)."},
-        {"name": "get_document_link", "description": "Get the shareable link to a specific document by its title or id."}
+        {
+          "name": "search_documents",
+          "description": "Find the most relevant documents by MEANING (semantic search over content), not just filename. Returns titles, matching passages, and links back to the file in the workspace's own cloud."
+        },
+        {
+          "name": "list_documents",
+          "description": "List the documents indexed for this workspace (most recent first)."
+        },
+        {
+          "name": "get_document_link",
+          "description": "Get the shareable link to a specific document by its title or id."
+        }
       ]
     },
-    "ui": { "url": "https://documents.plugins.bibekpoudel.com/app", "embeddable": true },
-    "rest": { "endpoint": "https://documents.plugins.bibekpoudel.com/api", "hotPath": true, "ingestPath": "/upload" }
+    "ui": {
+      "url": "https://documents.plugins.bibekpoudel.com/app",
+      "embeddable": true
+    },
+    "rest": {
+      "endpoint": "https://documents.plugins.bibekpoudel.com/api",
+      "hotPath": true,
+      "ingestPath": "/upload"
+    }
   },
   "entitlementKey": "documents",
   "roles": [
-    {"key": "admin", "label": "Documents Admin", "description": "Connect the cloud drive, upload, and search all documents. (v1 is admin-only; staff access comes later.)"}
+    {
+      "key": "admin",
+      "label": "Documents Admin",
+      "description": "Connect the cloud drive, upload, and search all documents. (v1 is admin-only; staff access comes later.)"
+    }
   ]
 }
