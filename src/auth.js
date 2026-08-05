@@ -2,11 +2,18 @@
 // gateway-only shared-secret check. Same trust model as the Attendance plugin
 // and the Python SDK.
 import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { timingSafeEqual } from 'node:crypto';
 
 const AUDIENCE = 'documents';
 const ISSUER = process.env.EESA_TOKEN_ISSUER || 'eesa';
 const GATEWAY_SECRET = process.env.PLUGIN_GATEWAY_SECRET || '';
 
+// Checked explicitly: `new URL(undefined)` throws "Invalid URL" at import time,
+// which in a container reads as an unrelated startup crash rather than a
+// missing variable.
+if (!process.env.EESA_JWKS_URL) {
+  throw new Error('EESA_JWKS_URL is required (e.g. https://api.eesa.ai/api/v1/.well-known/jwks.json)');
+}
 const JWKS = createRemoteJWKSet(new URL(process.env.EESA_JWKS_URL));
 
 export class AuthError extends Error {
@@ -43,12 +50,40 @@ export async function verifyToken(authHeader, { surface } = {}) {
   };
 }
 
+// Fails CLOSED when the secret is unset. The manifest declares
+// `auth.gatewayOnly: true`, so a missing env var must not quietly downgrade
+// /mcp to "any valid Eesa token gets in" — a deploy that forgot the variable
+// would look healthy while advertising a protection it no longer had.
+//
+// Set ALLOW_UNGATED_MCP=1 for local development against a gateway you are not
+// running. It is deliberately noisy and deliberately not the default.
+const ALLOW_UNGATED = process.env.ALLOW_UNGATED_MCP === '1';
+
+if (!GATEWAY_SECRET && !ALLOW_UNGATED) {
+  console.warn(
+    '[auth] PLUGIN_GATEWAY_SECRET is not set — every /mcp call will be refused. ' +
+    'Set it to the value held in the platform connection, or ALLOW_UNGATED_MCP=1 for local dev.',
+  );
+}
+
 export function requireGateway(req) {
-  if (!GATEWAY_SECRET) return;
+  if (ALLOW_UNGATED) return;
+  if (!GATEWAY_SECRET) {
+    throw new AuthError('plugin is not configured for gateway calls', 503);
+  }
   const got = req.get('X-Eesa-Gateway-Secret');
-  if (!got || got !== GATEWAY_SECRET) {
+  if (!got || !timingSafeEqualStr(got, GATEWAY_SECRET)) {
     throw new AuthError('gateway secret missing or invalid', 403);
   }
+}
+
+// Constant-time compare: a plain `!==` on a shared secret leaks its prefix a
+// byte at a time to anyone who can measure the response.
+function timingSafeEqualStr(a, b) {
+  const ba = Buffer.from(String(a));
+  const bb = Buffer.from(String(b));
+  if (ba.length !== bb.length) return false;
+  return timingSafeEqual(ba, bb);
 }
 
 // Express middleware: verify token (optionally a surface) + gateway secret.

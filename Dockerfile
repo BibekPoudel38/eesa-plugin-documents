@@ -11,8 +11,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates fontconfig \
     && rm -rf /var/lib/apt/lists/*
 
-COPY package.json ./
-RUN npm install --omit=dev
+# `npm ci` from the committed lockfile, NOT `npm install`. Without the lockfile
+# every rebuild re-resolved the `^` ranges, so the image that passed review and
+# the image that shipped a week later were not the same code. `ci` also fails
+# loudly when package.json and the lock disagree, instead of quietly updating.
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
 
 COPY . .
 

@@ -102,7 +102,13 @@ export async function setConnectionMeta(tenantId, provider, { rootFolderId, sync
   );
 }
 
-// ---- members (v1: admin-only) ---------------------------------------------
+// ---- members ---------------------------------------------------------------
+//: Roles this plugin understands. v1 only ever writes `admin`, but the set is
+//: named so the staff-access work has one place to extend rather than a literal
+//: to hunt for. Anything unrecognised falls back to the least privilege.
+export const ROLES = ['admin', 'member'];
+const DEFAULT_ROLE = 'member';
+
 const memberOut = (m) => m && { employeeRef: m.employee_ref, role: m.role, name: m.name, email: m.email };
 
 export async function getMember(tenantId, employeeRef) {
@@ -120,7 +126,12 @@ export async function upsertMember(tenantId, { employeeRef, role = 'admin', name
      on conflict (tenant_id, employee_ref) do update
        set role = excluded.role, name = excluded.name, email = excluded.email, active = true
      returning *`,
-    [tenantId, employeeRef, role === 'admin' ? 'admin' : 'admin', String(name).slice(0, 200), String(email).slice(0, 200)],
+    // Was `role === 'admin' ? 'admin' : 'admin'`, which silently granted admin
+    // to every caller-supplied value. Harmless while v1 only ever passes
+    // 'admin', and exactly the kind of thing that stops being harmless the day
+    // staff roles arrive.
+    [tenantId, employeeRef, ROLES.includes(role) ? role : DEFAULT_ROLE,
+     String(name).slice(0, 200), String(email).slice(0, 200)],
   );
   return memberOut(rows[0]);
 }
@@ -245,7 +256,14 @@ export async function finishJob(id, ok, error = '') {
     [id, ok ? 'done' : 'error', String(error).slice(0, 2000)]);
 }
 
-export async function queuePending() {
-  const rows = await q(`select count(*)::int as n from ingest_jobs where state in ('queued','running')`, []);
+// Tenant-scoped, like every other read here. An unscoped count would report the
+// whole platform's indexing backlog to any one workspace's admin, which is both
+// a small information leak and a confusing number to show them.
+export async function queuePending(tenantId) {
+  const rows = await q(
+    `select count(*)::int as n from ingest_jobs
+      where tenant_id = $1 and state in ('queued','running')`,
+    [tenantId],
+  );
   return rows[0].n;
 }

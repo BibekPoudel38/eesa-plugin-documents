@@ -6,8 +6,8 @@
 // Checks, in dependency order: env → postgres/schema → FastEmbed → Qdrant
 // (upsert+search+cleanup) → extraction/chunking. Exits non-zero on any failure.
 import { randomUUID } from 'node:crypto';
-import { embedQuery, EMBED_DIM } from '../src/embed.js';
-import { ensureCollection, upsertDocumentChunks, search, deleteDocument } from '../src/qdrant.js';
+import { embedQuery, embedDim, MODEL_NAME } from '../src/embed.js';
+import { ensureCollection, upsertDocumentChunks, search, deleteDocument, dropTenant, ping } from '../src/qdrant.js';
 import { extractText, chunkText } from '../src/extract.js';
 import { pool } from '../src/db.js';
 
@@ -49,16 +49,19 @@ await step('postgres + schema', async () => {
 
 await step('embeddings (FastEmbed)', async () => {
   const v = await embedQuery('hello world');
-  if (!Array.isArray(v) || v.length !== EMBED_DIM) {
-    throw new Error(`expected ${EMBED_DIM} dims, got ${v && v.length}`);
+  const dim = await embedDim();
+  if (!Array.isArray(v) || v.length !== dim) {
+    throw new Error(`expected ${dim} dims, got ${v && v.length}`);
   }
-  return `(${v.length} dims)`;
+  return `(${MODEL_NAME}, ${v.length} dims)`;
 });
 
 const TID = 'smoke-' + randomUUID().slice(0, 8);
 const DID = randomUUID();
+await step('qdrant reachable', async () => `(${await ping()} collections)`);
+
 await step('qdrant upsert + semantic search', async () => {
-  await ensureCollection();
+  await ensureCollection(TID);
   const passage = 'The quarterly lease renewal agreement for the Anaheim premises.';
   await upsertDocumentChunks(TID, DID, [{
     vector: await embedQuery(passage), text: passage, chunkIx: 0,
@@ -71,7 +74,10 @@ await step('qdrant upsert + semantic search', async () => {
 
 await step('qdrant cleanup', async () => {
   await deleteDocument(TID, DID);
-  return '(test vectors removed)';
+  // Per-tenant collections mean the smoke test creates one. Drop it, or a
+  // repeated smoke run leaks a collection into the shared cluster each time.
+  await dropTenant(TID);
+  return '(test collection removed)';
 });
 
 await step('extract + chunk', async () => {

@@ -9,13 +9,15 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
 import { verifyToken, requireGateway } from './auth.js';
-import { encrypt, decrypt } from './crypto.js';
 import * as db from './db.js';
 import * as pipeline from './pipeline.js';
 import { getProvider, listProviders, isSupported } from './providers/index.js';
 import { handleRpc } from './mcp.js';
+// esc/page/state live in web.js so they can be unit tested: this module calls
+// app.listen() at import, so nothing defined here is reachable from a test.
+import { esc, page, makeState, readState } from './web.js';
 import { embedQuery, warm } from './embed.js';
-import { search, ensureCollection } from './qdrant.js';
+import { search, ping as qdrantPing } from './qdrant.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MANIFEST = JSON.parse(readFileSync(join(__dirname, '..', 'manifest.json'), 'utf-8'));
@@ -72,22 +74,9 @@ function admin() {
 }
 
 // ---- OAuth connect (generic across providers) -----------------------------
-// state carries tenant + user + provider through the provider's redirect,
-// tamper-proof (AES-256-GCM). start is token-authed; the callback trusts state.
-function makeState(tenantId, sub, provider) {
-  return encodeURIComponent(encrypt(JSON.stringify({ t: tenantId, s: sub, p: provider, ts: Date.now() })));
-}
-function readState(state) {
-  try { return JSON.parse(decrypt(decodeURIComponent(String(state || '')))); }
-  catch { return null; }
-}
-function page(title, body) {
-  return `<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
-  <title>${title}</title><body style="font-family:system-ui;margin:0;display:grid;place-items:center;height:100vh;background:#0b1020;color:#e6e9f0">
-  <div style="max-width:420px;text-align:center;padding:24px"><h2 style="margin:0 0 8px">${title}</h2>
-  <p style="opacity:.8;line-height:1.5">${body}</p></div>`;
-}
-
+// The signed state (see web.js) carries tenant + user + provider through the
+// provider's redirect: tamper-proof, and expiring so it cannot be replayed.
+// `start` is token-authed; the callback has no bearer and trusts that state.
 app.get('/api/providers', admin(), async (req, res) => {
   res.json({ ok: true, data: { providers: listProviders(), connections: await db.listConnections(req.ctx.tenantId) } });
 });
@@ -106,10 +95,15 @@ app.get('/api/connect/:provider/start', admin(), (req, res) => {
 app.get('/api/connect/:provider/callback', async (req, res) => {
   const providerKey = req.params.provider;
   const { code, state, error } = req.query;
-  if (error) return res.status(400).send(page('Connection cancelled', String(error)));
+  if (error) return res.status(400).send(page('Connection cancelled', esc(error)));
   const st = readState(state);
   if (!isSupported(providerKey) || !code || !st?.t || st.p !== providerKey) {
-    return res.status(400).send(page('Invalid callback', 'Missing or mismatched authorization state.'));
+    // One message for a malformed, mismatched OR expired state: telling the
+    // caller which it was would help someone probing the endpoint.
+    return res.status(400).send(page(
+      'Link expired',
+      'This connection link is no longer valid. Open Documents in Eesa and start again.',
+    ));
   }
   try {
     const tok = await getProvider(providerKey).exchangeCode(String(code));
@@ -120,9 +114,13 @@ app.get('/api/connect/:provider/callback', async (req, res) => {
     await db.upsertMember(st.t, { employeeRef: st.s, role: 'admin', email: tok.accountEmail });
     pipeline.syncTenant(st.t, providerKey).catch((e) => console.warn('initial sync failed:', e.message));
     const label = listProviders().find((p) => p.key === providerKey)?.label || providerKey;
-    return res.send(page(`${label} connected ✓`, `We're indexing <b>${tok.accountEmail || 'your drive'}</b> now. Return to Eesa chat and ask for a document by meaning — e.g. "find the lease agreement".`));
+    return res.send(page(
+      `${label} connected`,
+      `We are indexing <b>${esc(tok.accountEmail || 'your drive')}</b> now. Return to Eesa chat and ask for a document by meaning, for example "find the lease agreement".`,
+    ));
   } catch (e) {
-    return res.status(500).send(page('Connection failed', e.message));
+    // The provider's error text can carry echoed input, so escape it too.
+    return res.status(500).send(page('Connection failed', esc(e.message)));
   }
 });
 
@@ -131,7 +129,7 @@ app.get('/api/status', admin(), async (req, res) => {
   const [connections, counts, pending] = await Promise.all([
     db.listConnections(req.ctx.tenantId),
     db.documentCounts(req.ctx.tenantId),
-    db.queuePending(),
+    db.queuePending(req.ctx.tenantId),
   ]);
   res.json({ ok: true, data: { connection: connections[0] || null, connections, providers: listProviders(), counts, pending } });
 });
@@ -188,6 +186,11 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`eesa-plugin-documents listening on :${PORT}`);
   warm();
-  ensureCollection().catch((e) => console.warn('qdrant init:', e.message));
+  // Nothing to provision at boot any more — each tenant's collection is created
+  // on first use. This is a reachability check, so a wrong QDRANT_URL is loud
+  // now rather than a failed search later.
+  qdrantPing()
+    .then((n) => console.log(`qdrant reachable (${n} collections)`))
+    .catch((e) => console.warn('qdrant unreachable:', e.message));
   setInterval(() => { pipeline.drainQueue().catch(() => {}); }, 30_000);
 });

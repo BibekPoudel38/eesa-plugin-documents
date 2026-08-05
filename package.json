@@ -3,12 +3,24 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Eesa Documents plugin — chat-based document management. Each tenant connects their OWN Google Drive; the plugin indexes content (semantic RAG) and NEVER hosts the file bytes. MCP + REST + embedded UI, on Coolify.",
-  "engines": { "node": ">=20" },
+  "description": "Eesa Documents plugin \u2014 chat-based document management. Each tenant connects their OWN Google Drive; the plugin indexes content (semantic RAG) and NEVER hosts the file bytes. MCP + REST + embedded UI, on Coolify.",
+  "engines": {
+    "node": ">=20"
+  },
+  "comments": {
+    "xlsx": "Pinned to SheetJS's own CDN tarball, NOT the npm package. The npm `xlsx` is abandoned at 0.18.5 and carries an unfixed prototype-pollution + ReDoS advisory (GHSA-4r6h-8v6p-xvw6, GHSA-5pgg-2g8v-p4x9); SheetJS publishes only to their CDN now. Bump by changing both version numbers in the URL.",
+    "overrides": "googleapis pulls uuid 9 via gaxios, which has an advisory fixed only in 11.x. Re-check on every dependency bump and drop the entry once googleapis ships a patched range of its own.",
+    "tar-advisory": "ACCEPTED RISK, not an oversight. fastembed (every version, including 2.x) pins tar ^6.2.0, and node-tar's fixes exist only in 7.x. Forcing tar 7 via overrides was tried and BREAKS fastembed at import: it does `import tar from 'tar'` and tar 7 removed the default export. The exposure is narrow: tar runs only to unpack the embedding model archive from the model CDN, that unpack happens at IMAGE BUILD time (scripts/prefetch.js bakes the model in), and no tenant-supplied bytes ever reach it. Revisit when fastembed moves to tar 7."
+  },
   "scripts": {
     "start": "node src/server.js",
     "smoke": "node scripts/smoke.js",
-    "check": "node --check src/server.js && node --check src/auth.js && node --check src/db.js && node --check src/mcp.js && node --check src/providers/index.js && node --check src/providers/google_drive.js && node --check src/pipeline.js && node --check src/extract.js && node --check src/embed.js && node --check src/qdrant.js && node --check src/crypto.js"
+    "audit": "npm audit --omit=dev",
+    "check": "node --check src/server.js && node --check src/auth.js && node --check src/db.js && node --check src/mcp.js && node --check src/providers/index.js && node --check src/providers/google_drive.js && node --check src/pipeline.js && node --check src/extract.js && node --check src/embed.js && node --check src/qdrant.js && node --check src/crypto.js",
+    "test": "node --test test/*.test.js"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
   },
   "dependencies": {
     "@napi-rs/canvas": "^0.1.65",
@@ -23,6 +35,6 @@
     "pdfjs-dist": "^4.7.76",
     "pg": "^8.12.0",
     "tesseract.js": "^5.1.1",
-    "xlsx": "^0.18.5"
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   }
 }
