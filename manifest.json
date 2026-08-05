@@ -53,7 +53,12 @@
     {
       "key": "admin",
       "label": "Documents Admin",
-      "description": "Connect the cloud drive, upload, and search all documents. (v1 is admin-only; staff access comes later.)"
+      "description": "Connect the workspace's cloud drive, upload files, and search everything."
+    },
+    {
+      "key": "staff",
+      "label": "Documents User",
+      "description": "Search the workspace's documents and open them. Cannot connect a drive, upload or sync."
     }
   ]
 }

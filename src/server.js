@@ -35,6 +35,21 @@ app.use((req, res, next) => {
 });
 
 app.get('/health', (req, res) => res.json({ ok: true, plugin: MANIFEST.slug }));
+
+// The Eesa launcher probes this to decide whether to show the app to a user,
+// and fails CLOSED when it cannot reach it — without this route the tile never
+// appears for anyone, however their role is set.
+app.get('/api/me', async (req, res) => {
+  let ctx;
+  try {
+    ctx = await verifyToken(req.get('Authorization'));
+  } catch (e) {
+    return res.status(e.status || 401).json({ ok: false, error: e.message });
+  }
+  const role = await effectiveRole(ctx);
+  // role null (not the string "none") is what the launcher reads as "no access".
+  res.json({ ok: true, role: role === 'none' ? null : role, plugin: MANIFEST.slug });
+});
 app.get('/manifest', (req, res) => res.json(MANIFEST));
 
 // ---- MCP surface: gateway-only + token, JSON-RPC ----
@@ -44,6 +59,10 @@ app.post('/mcp', async (req, res) => {
   try {
     requireGateway(req);
     const ctx = await verifyToken(req.get('Authorization'));
+    // Role-gate the agent surface too. Without this a user Eesa has set to
+    // "none" still reaches every document through chat, which is the whole
+    // point of the permission page defeated by the back door.
+    ctx.role_ = await effectiveRole(ctx);
     const result = await handleRpc(body, ctx, serverInfo);
     if (isNotification || result === null) return res.status(202).end();
     return res.json({ jsonrpc: '2.0', id: body.id, result });
@@ -53,25 +72,59 @@ app.post('/mcp', async (req, res) => {
   }
 });
 
-// ---- admin gate (v1 is admin-only) ----------------------------------------
+// ---- roles ----------------------------------------------------------------
+// Eesa is authoritative. It derives a role from two protected positions and
+// stamps it as the `appRole` claim:
+//
+//   admin  connect/disconnect a drive, upload, sync, search, read
+//   staff  search and read only
+//   none   refused everywhere
+//
+// The claim is ABSENT for a workspace that has not built a roster yet. That is
+// deliberate on Eesa's side and must stay meaningful here: absent means "not
+// governed", so we fall back to the original bootstrap rather than locking out
+// the admin who connected the drive before roles existed. A claim of "none" is
+// a decision and IS enforced.
 function isPlatformAdmin(ctx) {
   return String(ctx.role || '').toUpperCase() === 'ADMIN';
 }
-function admin() {
+
+/** Resolve the caller's effective role for this plugin. */
+async function effectiveRole(ctx) {
+  const claim = String(ctx.raw?.appRole || '').toLowerCase();
+  if (claim === 'admin' || claim === 'staff' || claim === 'none') return claim;
+  // Ungoverned tenant: the pre-roles behaviour.
+  const member = await db.getMember(ctx.tenantId, ctx.sub);
+  return isPlatformAdmin(ctx) || member ? 'admin' : 'none';
+}
+
+const RANK = { none: 0, staff: 1, admin: 2 };
+
+/** Express middleware: verified token + at least `min` role. */
+function requireRole(min) {
   return async (req, res, next) => {
     try {
       req.ctx = await verifyToken(req.get('Authorization'));
     } catch (e) {
       return res.status(e.status || 401).json({ ok: false, error: e.message });
     }
-    const member = await db.getMember(req.ctx.tenantId, req.ctx.sub);
-    if (!(isPlatformAdmin(req.ctx) || member)) {
-      return res.status(403).json({ ok: false, error: { code: 'FORBIDDEN', message: 'Admin access required.' } });
+    req.role = await effectiveRole(req.ctx);
+    if (RANK[req.role] < RANK[min]) {
+      return res.status(403).json({
+        ok: false,
+        error: {
+          code: 'FORBIDDEN',
+          message: min === 'admin'
+            ? 'Only a Documents admin can do that. Ask your workspace admin in Management, Documents.'
+            : 'You do not have access to Documents. Ask your workspace admin in Management, Documents.',
+        },
+      });
     }
-    req.member = member;
     next();
   };
 }
+const admin = () => requireRole('admin');
+const reader = () => requireRole('staff');
 
 // ---- OAuth connect (generic across providers) -----------------------------
 // The signed state (see web.js) carries tenant + user + provider through the
@@ -125,7 +178,7 @@ app.get('/api/connect/:provider/callback', async (req, res) => {
 });
 
 // ---- status / documents / search / upload / sync --------------------------
-app.get('/api/status', admin(), async (req, res) => {
+app.get('/api/status', reader(), async (req, res) => {
   const [connections, counts, pending] = await Promise.all([
     db.listConnections(req.ctx.tenantId),
     db.documentCounts(req.ctx.tenantId),
@@ -134,11 +187,11 @@ app.get('/api/status', admin(), async (req, res) => {
   res.json({ ok: true, data: { connection: connections[0] || null, connections, providers: listProviders(), counts, pending } });
 });
 
-app.get('/api/documents', admin(), async (req, res) => {
+app.get('/api/documents', reader(), async (req, res) => {
   res.json({ ok: true, data: await db.listDocuments(req.ctx.tenantId, { limit: Number(req.query.limit) || 50 }) });
 });
 
-app.get('/api/search', admin(), async (req, res) => {
+app.get('/api/search', reader(), async (req, res) => {
   const q = String(req.query.q || '').trim();
   if (!q) return res.json({ ok: true, data: [] });
   try {

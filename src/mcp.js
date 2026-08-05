@@ -58,6 +58,16 @@ export async function handleRpc(body, ctx, serverInfo) {
 }
 
 async function runTool(name, args, ctx) {
+  // Every tool here reads documents, so "staff" is the floor. `role_` is set by
+  // the /mcp handler; when it is absent (a caller that skipped that path) fail
+  // closed rather than assuming access.
+  if (ctx.role_ !== 'admin' && ctx.role_ !== 'staff') {
+    return {
+      results: [],
+      note: 'You do not have access to the documents in this workspace. '
+        + 'A workspace admin can grant it under Management, Documents.',
+    };
+  }
   if (name === 'search_documents') {
     const query = String(args.query || '').trim();
     if (!query) return { results: [], note: 'Provide a search query.' };
