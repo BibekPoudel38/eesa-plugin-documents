@@ -234,6 +234,26 @@ app.post('/api/sync', admin(), async (req, res) => {
 // ---- embedded UI ----------------------------------------------------------
 app.get('/app', (req, res) => res.sendFile(join(__dirname, '..', 'public', 'app.html')));
 
+// ---- error handler --------------------------------------------------------
+// Express's default handler answers a malformed body with an HTML stack trace
+// listing /app/node_modules/... — a free map of the dependency tree and layout
+// to anyone who POSTs `{`. Answer in the shape the caller expected instead, and
+// keep the detail in the logs.
+app.use((err, req, res, _next) => {
+  const status = err.status || err.statusCode || 500;
+  if (status >= 500) console.error('unhandled error:', err);
+  const isRpc = req.path === '/mcp';
+  const message = status === 400 && err.type === 'entity.parse.failed'
+    ? 'malformed JSON body'
+    : (status >= 500 ? 'internal error' : (err.message || 'request rejected'));
+  if (isRpc) {
+    return res.status(status).json({
+      jsonrpc: '2.0', id: null, error: { code: -32700, message },
+    });
+  }
+  res.status(status).json({ ok: false, error: message });
+});
+
 // ---- boot -----------------------------------------------------------------
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {

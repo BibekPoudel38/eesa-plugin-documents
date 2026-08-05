@@ -24,7 +24,7 @@
   },
   "dependencies": {
     "@napi-rs/canvas": "^0.1.65",
-    "@qdrant/js-client-rest": "^1.11.0",
+    "@qdrant/js-client-rest": "^1.19.0",
     "express": "^4.19.2",
     "fastembed": "^1.14.1",
     "googleapis": "^144.0.0",

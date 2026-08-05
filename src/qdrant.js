@@ -159,15 +159,19 @@ export async function dropTenant(tenantId) {
 // Semantic search, tenant-scoped. Returns one hit per document (best chunk).
 export async function search(tenantId, vector, limit = 6) {
   const name = await ensureCollection(tenantId);
-  const res = await client().search(name, {
-    vector,
+  // `query`, not `search`: the client dropped .search() in 1.12 and the range
+  // here (^1.11.0) had been resolving to a version without it, so semantic
+  // search failed at runtime with "client(...).search is not a function".
+  // `query` also returns {points:[...]} rather than a bare array.
+  const res = await client().query(name, {
+    query: vector,
     limit: Math.max(limit, limit * 3), // over-fetch, then dedupe by document
     filter: { must: [{ key: 'tenant_id', match: { value: tenantId } }] },
     with_payload: true,
   });
   const seen = new Set();
   const out = [];
-  for (const r of res) {
+  for (const r of (res.points || [])) {
     const docId = r.payload.document_id;
     if (seen.has(docId)) continue;
     seen.add(docId);
