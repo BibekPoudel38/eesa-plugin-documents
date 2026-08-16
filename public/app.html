@@ -127,11 +127,47 @@ async function refresh() {
   }
 }
 
+// alert() is unusable here. The Eesa shell embeds this page with
+// sandbox="allow-scripts allow-forms allow-same-origin allow-popups" — no
+// allow-modals — so Chrome swallows every alert silently. Connect failing
+// therefore looked like a dead button: no popup, no message, no console error.
+// Say it in the page instead.
+function showError(msg) {
+  const el = $('connSub');
+  el.textContent = msg;
+  el.style.color = '#f87171';
+}
+
 $('connectBtn').onclick = async () => {
-  try { const { url } = await api('/connect/google/start'); window.open(url, '_blank', 'noopener'); }
-  catch (e) { alert('Connect failed: ' + e.message); }
+  $('connectBtn').disabled = true;
+  showError('Starting Google sign-in…');
+  try {
+    const { url } = await api('/connect/google/start');
+    if (!url) throw new Error('the server returned no authorization URL');
+    const w = window.open(url, '_blank', 'noopener');
+    // allow-popups is set, but a blocked popup still returns null and the user
+    // is owed a way through rather than a silent no-op.
+    if (!w) {
+      showError('Your browser blocked the sign-in window. Open this link: ' + url);
+      const a = document.createElement('a');
+      a.href = url; a.target = '_blank'; a.rel = 'noopener';
+      a.textContent = 'Continue to Google';
+      a.style.cssText = 'display:block;margin-top:6px;color:#93c5fd';
+      $('connSub').after(a);
+    } else {
+      showError('Finish in the Google window, then press Re-sync.');
+    }
+  } catch (e) {
+    showError('Connect failed: ' + e.message);
+  }
+  $('connectBtn').disabled = false;
 };
-$('syncBtn').onclick = async () => { $('syncBtn').disabled = true; try { await api('/sync', { method: 'POST' }); } catch (e) { alert(e.message); } $('syncBtn').disabled = false; refresh(); };
+$('syncBtn').onclick = async () => {
+  $('syncBtn').disabled = true;
+  try { await api('/sync', { method: 'POST' }); }
+  catch (e) { showError(e.message); }
+  $('syncBtn').disabled = false; refresh();
+};
 
 // Upload: raw fetch (FormData sets its own multipart Content-Type — don't force JSON).
 $('file').onchange = async (e) => {
