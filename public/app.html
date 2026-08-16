@@ -66,7 +66,37 @@
 // injected global; the shell can be configured to pass whichever it uses.
 const params = new URLSearchParams(location.search);
 const hash = new URLSearchParams(location.hash.slice(1));
-const TOKEN = params.get('t') || hash.get('t') || window.__EESA_UI_TOKEN__ || '';
+let TOKEN = params.get('t') || hash.get('t') || window.__EESA_UI_TOKEN__ || '';
+
+// The Eesa shell does NOT pass the token in the URL — it hands it over the
+// postMessage bridge, and only after the iframe says it is ready:
+//
+//     iframe -> parent   { type: 'eesa:plugin-ready' }
+//     parent -> iframe   { type: 'eesa:session', token, theme }
+//
+// (see PluginEmbed in the Eesa frontend). Reading only ?t=/#t= meant TOKEN was
+// '' inside the shell, so every call went out as `Bearer ` and the app showed
+// "Could not load status: missing bearer token" — which reads like a broken
+// plugin rather than a handshake that was never implemented.
+//
+// A URL token still wins when present, so opening the page directly with ?t=
+// keeps working for debugging.
+window.addEventListener('message', (ev) => {
+  const d = ev.data || {};
+  if (d.type !== 'eesa:session' || !d.token) return;
+  // The shell posts to the plugin's own origin, so anything arriving here has
+  // already been origin-targeted by the sender; accept the first token and
+  // re-render with it.
+  TOKEN = d.token;
+  if (d.theme) document.documentElement.dataset.theme = d.theme;
+  refresh();
+});
+
+// Announce readiness once the listener above is installed, or the shell's
+// reply can arrive before anything is listening for it.
+if (window.parent && window.parent !== window) {
+  window.parent.postMessage({ type: 'eesa:plugin-ready' }, '*');
+}
 
 async function api(path, opts = {}) {
   const r = await fetch('/api' + path, {
