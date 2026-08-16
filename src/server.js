@@ -256,8 +256,26 @@ app.use((err, req, res, _next) => {
 
 // ---- boot -----------------------------------------------------------------
 const PORT = process.env.PORT || 3000;
+// The schema is idempotent by design (every statement is IF NOT EXISTS, and
+// db/schema.sql says so in its header), but nothing in the container ever
+// applied it — the documented path is a human running
+// `psql "$DATABASE_URL" -f db/schema.sql` by hand. A fresh deployment therefore
+// came up healthy, served /manifest, and then failed every real call with
+// `relation "members" does not exist`, which reads like a broken plugin rather
+// than an un-provisioned database. Applying it at boot makes a new environment
+// self-provisioning, and re-applying on every restart is a no-op.
+async function applySchema() {
+  const sql = readFileSync(join(__dirname, '..', 'db', 'schema.sql'), 'utf8');
+  await db.pool.query(sql);
+}
+
 app.listen(PORT, () => {
   console.log(`eesa-plugin-documents listening on :${PORT}`);
+  applySchema()
+    .then(() => console.log('schema applied (idempotent)'))
+    // Loud, but not fatal: a running process that can still serve /manifest and
+    // report the failure beats a crash loop with no reachable diagnostics.
+    .catch((e) => console.error('schema apply FAILED:', e.message));
   warm();
   // Nothing to provision at boot any more — each tenant's collection is created
   // on first use. This is a reachability check, so a wrong QDRANT_URL is loud
