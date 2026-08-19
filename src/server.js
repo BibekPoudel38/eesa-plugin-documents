@@ -293,7 +293,13 @@ app.get('/api/debug/scoping', (req, res, next) => {
     const docs = await db.listDocuments(tenantId, { limit: 5 });
     const probes = [];
     for (const d of docs) {
+      // Also load it the way the INDEXER does. listDocuments uses `select *`
+      // and getDocumentByFile an explicit column list, so the two can disagree
+      // about whether `folder` exists at all — which is exactly the bug this
+      // endpoint was written to find.
+      const asIndexer = await db.getDocumentByFile(tenantId, d.provider || 'google_drive', d.fileId || d.file_id || '');
       probes.push({ title: d.title, folder: d.folder, stored: d.scope,
+                    indexerFolder: asIndexer ? (asIndexer.folder ?? null) : 'NOT FOUND',
                     computed: await db.scopeForFolder(tenantId, d.folder || '', shared) });
     }
     res.json({ ok: true, data: { sharedFolderId: shared,

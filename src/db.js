@@ -144,6 +144,8 @@ const docOut = (d) =>
     mime: d.mime,
     link: d.link,
     folder: d.folder,
+    provider: d.provider,
+    fileId: d.file_id,
     // Surfaced because an unscoped document is invisible to search while
     // looking perfectly healthy everywhere else — without this the only way to
     // notice was to read Qdrant payloads by hand.
