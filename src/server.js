@@ -279,6 +279,31 @@ app.get('/api/folders', reader(), async (req, res) => {
   })) } });
 });
 
+// Why is a document unscoped? Answers that in one call instead of reading
+// Qdrant payloads by hand. Gateway-only; returns mappings, never content.
+app.get('/api/debug/scoping', (req, res, next) => {
+  try { requireGateway(req); } catch (e) { return res.status(e.status || 403).json({ ok: false, error: e.message }); }
+  next();
+}, async (req, res) => {
+  const tenantId = String(req.query.tenantId || '').trim();
+  if (!tenantId) return res.status(400).json({ ok: false, error: 'tenantId required' });
+  try {
+    const folders = await db.listMemberFolders(tenantId);
+    const shared = await db.getSharedFolderId(tenantId);
+    const docs = await db.listDocuments(tenantId, { limit: 5 });
+    const probes = [];
+    for (const d of docs) {
+      probes.push({ title: d.title, folder: d.folder, stored: d.scope,
+                    computed: await db.scopeForFolder(tenantId, d.folder || '', shared) });
+    }
+    res.json({ ok: true, data: { sharedFolderId: shared,
+      memberFolders: folders.map((f) => ({ ref: f.employee_ref, email: f.email, folderId: f.folder_id })),
+      probes } });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message, stack: String(e.stack || '').split('\n')[1] });
+  }
+});
+
 // Provision a member from the platform. This is the hook Eesa calls when it
 // grants someone Documents access: the plugin cannot see Eesa's roster, so
 // without it a member only becomes real the first time they happen to open the
