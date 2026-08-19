@@ -160,7 +160,11 @@ app.post('/api/setup-link', (req, res, next) => {
   const token = randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, '');
   const row = await db.createSetupLink(tenantId, {
     token, provider,
-    employeeRef: String(req.body?.employeeRef || 'setup'),
+    // No fake default. 'setup' looked harmless and was not: the connect
+    // callback records the member row under whatever ref the link carried, so
+    // a placeholder here means the real admin never gets a member row and is
+    // refused by their own plugin.
+    employeeRef: String(req.body?.employeeRef || '').trim() || 'setup',
     ttlMinutes: Math.min(Number(req.body?.ttlMinutes) || 60, 1440),
   });
   const base = (process.env.PLUGIN_BASE_URL || '').replace(/\/$/, '');
@@ -273,6 +277,43 @@ app.get('/api/folders', reader(), async (req, res) => {
     docCount: Number(r.doc_count || 0),
     mine: r.employee_ref === req.ctx.sub,
   })) } });
+});
+
+// Provision a member from the platform. This is the hook Eesa calls when it
+// grants someone Documents access: the plugin cannot see Eesa's roster, so
+// without it a member only becomes real the first time they happen to open the
+// app — and until then they are 'none' and everything refuses.
+//
+// Gateway-only: the platform asking, never a browser.
+app.post('/api/members', (req, res, next) => {
+  try { requireGateway(req); } catch (e) { return res.status(e.status || 403).json({ ok: false, error: e.message }); }
+  next();
+}, async (req, res) => {
+  const tenantId = String(req.body?.tenantId || '').trim();
+  const employeeRef = String(req.body?.employeeRef || '').trim();
+  if (!tenantId || !employeeRef) {
+    return res.status(400).json({ ok: false, error: 'tenantId and employeeRef are required' });
+  }
+  const m = await db.upsertMember(tenantId, {
+    employeeRef,
+    role: String(req.body?.role || 'admin'),
+    email: String(req.body?.email || ''),
+    name: String(req.body?.name || ''),
+  });
+  // Give them their folder now rather than on first visit, so an admin who
+  // grants access can see it land.
+  let folderId = null;
+  try {
+    const conn = await db.getConnection(tenantId, 'google_drive');
+    if (conn) {
+      const gd = getProvider('google_drive');
+      await gd.ensureSharedFolder(tenantId);
+      folderId = await gd.ensureMemberFolder(tenantId, { employeeRef, email: String(req.body?.email || '') });
+    }
+  } catch (e) {
+    console.warn('member folder provisioning:', e.message);
+  }
+  res.json({ ok: true, data: { member: m, folderId } });
 });
 
 // The admin panel's roster: who has a folder, what is in it, and what they are
