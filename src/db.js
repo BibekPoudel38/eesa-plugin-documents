@@ -267,3 +267,85 @@ export async function queuePending(tenantId) {
   );
   return rows[0].n;
 }
+
+
+// ---------------------------------------------------------------------------
+// Per-member scoping
+// ---------------------------------------------------------------------------
+// One rule, in one place: what may this caller read?
+//
+//   'shared'          the workspace folder everyone sees
+//   'member:<ref>'    that person's own folder, and nobody else's
+//
+// An admin is NOT given everyone's folders. "Admin" here governs connecting a
+// drive and managing members, not reading colleagues' private documents — the
+// point of the feature is that a member's folder answers only for them, and an
+// admin backdoor would quietly make that untrue.
+
+/** Scopes this caller may read. Never returns [] for a real member — 'shared'
+ *  is always readable — so an empty result means "no identity", which the
+ *  search layer treats as "read nothing". */
+export const SHARED_REF = '__shared__';
+
+export function scopesFor(employeeRef) {
+  const ref = String(employeeRef || '').trim();
+  if (!ref) return [];              // no identity -> reads nothing
+  return ['shared', `member:${ref}`];
+}
+
+export async function getMemberFolder(tenantId, employeeRef) {
+  const rows = await q(
+    `select * from member_folders where tenant_id = $1 and employee_ref = $2`,
+    [tenantId, employeeRef],
+  );
+  return rows[0] || null;
+}
+
+export async function upsertMemberFolder(tenantId, { employeeRef, email = '', folderId }) {
+  const rows = await q(
+    `insert into member_folders (tenant_id, employee_ref, email, folder_id)
+     values ($1, $2, $3, $4)
+     on conflict (tenant_id, employee_ref)
+     do update set email = excluded.email, folder_id = excluded.folder_id
+     returning *`,
+    [tenantId, employeeRef, email, folderId],
+  );
+  return rows[0];
+}
+
+/** Which scope a file belongs to, from the Drive folder it sits in.
+ *  Unknown folder -> '' -> indexed but readable by nobody, which is the safe
+ *  direction: a misfiled document is invisible rather than public. */
+export async function scopeForFolder(tenantId, folderId, sharedFolderId) {
+  if (folderId && sharedFolderId && folderId === sharedFolderId) return 'shared';
+  const rows = await q(
+    `select employee_ref from member_folders where tenant_id = $1 and folder_id = $2`,
+    [tenantId, folderId],
+  );
+  const ref = rows[0]?.employee_ref;
+  if (!ref) return '';
+  // The Shared folder is stored in this same table under a sentinel ref so
+  // there is one folder->scope map rather than two. Without this line it would
+  // resolve to `member:__shared__` — a scope nobody holds — and the shared
+  // folder would answer for no one whenever the cached id was missing.
+  return ref === SHARED_REF ? 'shared' : `member:${ref}`;
+}
+
+
+export async function setDocumentScope(documentId, scope) {
+  await q(`update documents set scope = $2, updated_at = now() where id = $1`,
+          [documentId, scope || '']);
+}
+
+/** The tenant's Shared folder id, cached on the connection row so indexing a
+ *  thousand files is not a thousand Drive lookups. */
+export async function getSharedFolderId(tenantId) {
+  const rows = await q(
+    `select folder_id from member_folders
+      where tenant_id = $1 and employee_ref = $2`, [tenantId, SHARED_REF]);
+  return rows[0]?.folder_id || '';
+}
+
+export async function setSharedFolderId(tenantId, folderId) {
+  return upsertMemberFolder(tenantId, { employeeRef: SHARED_REF, email: '', folderId });
+}

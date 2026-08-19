@@ -116,7 +116,7 @@ export async function ensureCollection(tenantId) {
 }
 
 // Replace ALL vectors for a document with a fresh set (idempotent re-index).
-export async function upsertDocumentChunks(tenantId, documentId, chunks) {
+export async function upsertDocumentChunks(tenantId, documentId, chunks, scope = '') {
   const name = await ensureCollection(tenantId);
   await deleteDocument(tenantId, documentId);
   if (!chunks.length) return;
@@ -130,6 +130,10 @@ export async function upsertDocumentChunks(tenantId, documentId, chunks) {
       text: ch.text,
       title: ch.title,
       link: ch.link,
+      // Who this chunk may answer for. See search(): an empty scope matches
+      // nobody, so a document indexed before scoping existed stays invisible
+      // until it is re-synced rather than silently becoming readable by all.
+      scope: scope || '',
     },
   }));
   await client().upsert(name, { wait: true, points });
@@ -157,7 +161,14 @@ export async function dropTenant(tenantId) {
 }
 
 // Semantic search, tenant-scoped. Returns one hit per document (best chunk).
-export async function search(tenantId, vector, limit = 6) {
+export async function search(tenantId, vector, limit = 6, scopes = null) {
+  // A caller with NO readable scopes reads nothing — short-circuit before the
+  // query. This is not an optimisation: Qdrant treats `should: []` as an empty
+  // constraint, i.e. it matches EVERYTHING, so building the filter from an
+  // empty array would turn "this person may read nothing" into "this person
+  // may read the entire workspace". The one case that must never be a leak is
+  // the one an empty list would produce.
+  if (Array.isArray(scopes) && scopes.length === 0) return [];
   const name = await ensureCollection(tenantId);
   // `query`, not `search`: the client dropped .search() in 1.12 and the range
   // here (^1.11.0) had been resolving to a version without it, so semantic
@@ -166,7 +177,23 @@ export async function search(tenantId, vector, limit = 6) {
   const res = await client().query(name, {
     query: vector,
     limit: Math.max(limit, limit * 3), // over-fetch, then dedupe by document
-    filter: { must: [{ key: 'tenant_id', match: { value: tenantId } }] },
+    // Scope is enforced INSIDE the query, never by filtering results
+    // afterwards. Post-filtering leaks: the excluded chunks still compete for
+    // rank, so a well-aimed question changes which allowed chunk surfaces, and
+    // the over-fetch/dedupe below would quietly drop allowed hits in favour of
+    // ones the caller may not read.
+    //
+    // `scopes === null` means "no scoping asked for" and preserves the old
+    // behaviour for callers that have not been updated. An EMPTY array means
+    // "this caller may read nothing" and must match nothing — not everything.
+    filter: {
+      must: [
+        { key: 'tenant_id', match: { value: tenantId } },
+        ...(scopes === null
+          ? []
+          : [{ should: scopes.map((sc) => ({ key: 'scope', match: { value: sc } })) }]),
+      ],
+    },
     with_payload: true,
   });
   const seen = new Set();

@@ -196,7 +196,8 @@ app.get('/api/search', reader(), async (req, res) => {
   if (!q) return res.json({ ok: true, data: [] });
   try {
     const vec = await embedQuery(q);
-    res.json({ ok: true, data: await search(req.ctx.tenantId, vec, Math.min(Number(req.query.limit) || 8, 20)) });
+    const scopes = db.scopesFor(req.ctx.sub);
+    res.json({ ok: true, data: await search(req.ctx.tenantId, vec, Math.min(Number(req.query.limit) || 8, 20), scopes) });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }

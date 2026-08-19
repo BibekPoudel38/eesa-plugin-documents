@@ -78,3 +78,30 @@ create table if not exists ingest_jobs (
     unique (tenant_id, provider, file_id)
 );
 create index if not exists ingest_jobs_state_idx on ingest_jobs (state, updated_at);
+
+
+-- Per-member document scoping (added when Chups asked for "each member only
+-- answers from their own files, plus a shared folder").
+--
+-- scope is the ONLY thing that decides who a chunk can answer for:
+--   'shared'            -> everyone in the workspace
+--   'member:<ref>'      -> exactly one person (ref = the Eesa user id, token sub)
+-- Anything else, including empty, matches nobody. Fail closed: a document that
+-- somehow lands without a scope is invisible rather than public.
+alter table documents add column if not exists scope text not null default '';
+create index if not exists documents_scope_idx on documents (tenant_id, scope);
+
+-- Which Drive folder belongs to whom. The folder is NAMED by email because a
+-- human has to find it in Drive; the scope is keyed on employee_ref because an
+-- email can change and a permission that follows a renamed mailbox is a bug.
+create table if not exists member_folders (
+    id            uuid primary key default gen_random_uuid(),
+    tenant_id     text not null,
+    employee_ref  text not null,
+    email         text not null default '',
+    folder_id     text not null,
+    created_at    timestamptz not null default now(),
+    unique (tenant_id, employee_ref),
+    unique (tenant_id, folder_id)
+);
+create index if not exists member_folders_tenant_idx on member_folders (tenant_id);

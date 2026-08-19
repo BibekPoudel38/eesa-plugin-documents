@@ -101,6 +101,53 @@ export async function ensureFolder(tenantId) {
   return id;
 }
 
+const SHARED_NAME = 'Shared';
+const MEMBERS_NAME = 'members';
+
+/** Find-or-create a folder by name under a known parent. Idempotent: two
+ *  concurrent syncs can both run this and converge on the same folder. */
+async function ensureSubfolder(drive, name, parentId) {
+  const safe = String(name).replace(/'/g, "\\'");
+  const found = await drive.files.list({
+    q: `name = '${safe}' and '${parentId}' in parents `
+     + `and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+    fields: 'files(id,name)', pageSize: 1,
+  });
+  const hit = found.data.files?.[0]?.id;
+  if (hit) return hit;
+  const made = await drive.files.create({
+    requestBody: { name, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] },
+    fields: 'id',
+  });
+  return made.data.id;
+}
+
+/** The workspace folder everyone can search. */
+export async function ensureSharedFolder(tenantId) {
+  const drive = await driveFor(tenantId);
+  const root = await ensureFolder(tenantId);
+  if (!drive || !root) return null;
+  const id = await ensureSubfolder(drive, SHARED_NAME, root);
+  // Record it in the same folder->scope map the pipeline reads, or indexing
+  // would have no way to recognise a file as shared.
+  await db.setSharedFolderId(tenantId, id);
+  return id;
+}
+
+/** One person's folder: Eesa Documents/members/<email>.
+ *  Named by email so a human can find it in Drive; the PERMISSION is keyed on
+ *  employeeRef in member_folders, so renaming a mailbox cannot hand someone
+ *  else's documents to a new address. */
+export async function ensureMemberFolder(tenantId, { employeeRef, email }) {
+  const drive = await driveFor(tenantId);
+  const root = await ensureFolder(tenantId);
+  if (!drive || !root) return null;
+  const membersId = await ensureSubfolder(drive, MEMBERS_NAME, root);
+  const folderId = await ensureSubfolder(drive, email || employeeRef, membersId);
+  await db.upsertMemberFolder(tenantId, { employeeRef, email: email || '', folderId });
+  return folderId;
+}
+
 const normalize = (f) => ({
   id: f.id,
   name: f.name,
@@ -108,6 +155,10 @@ const normalize = (f) => ({
   link: f.webViewLink || '',
   size: f.size ? Number(f.size) : null,
   hash: f.md5Checksum || (f.modifiedTime ? `m:${f.modifiedTime}` : null),
+  // The folder a file sits in IS its permission. Without this the pipeline has
+  // nothing to derive a scope from and every document would fall back to
+  // "readable by nobody".
+  folderId: (f.parents && f.parents[0]) || '',
 });
 
 export async function listAllFiles(tenantId, onFile) {
@@ -117,7 +168,7 @@ export async function listAllFiles(tenantId, onFile) {
   do {
     const res = await drive.files.list({
       q: `trashed = false and mimeType != 'application/vnd.google-apps.folder'`,
-      fields: 'nextPageToken, files(id,name,mimeType,webViewLink,size,modifiedTime,md5Checksum)',
+      fields: 'nextPageToken, files(id,name,mimeType,webViewLink,size,modifiedTime,md5Checksum,parents)',
       pageSize: 100, pageToken, corpora: 'user',
     });
     for (const f of res.data.files || []) {

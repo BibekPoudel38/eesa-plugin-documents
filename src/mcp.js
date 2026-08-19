@@ -74,7 +74,11 @@ async function runTool(name, args, ctx) {
     const conn = await db.getConnection(ctx.tenantId, 'google_drive');
     if (!conn) return { results: [], note: 'No cloud drive is connected yet. Open the Documents app and connect Google Drive.' };
     const vec = await embedQuery(query);
-    const hits = await search(ctx.tenantId, vec, Math.min(Number(args.limit) || 6, 20));
+    // The caller's own scopes, derived here rather than trusted from args —
+    // an agent tool call is attacker-influenced text, and a scope taken from
+    // it would let a question ask for someone else's folder.
+    const scopes = db.scopesFor(ctx.sub);
+    const hits = await search(ctx.tenantId, vec, Math.min(Number(args.limit) || 6, 20), scopes);
     return {
       results: hits.map((h) => ({
         title: h.title,

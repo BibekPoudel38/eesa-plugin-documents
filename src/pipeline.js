@@ -38,7 +38,17 @@ async function processJob(job) {
   const points = chunks.map((c, i) => ({
     vector: vectors[i], text: c.slice(0, 1500), chunkIx: i, title: doc.title, link: doc.link,
   }));
-  await upsertDocumentChunks(tenantId, doc.id, points);
+  // Stamp the scope from the folder the file actually lives in. Derived here,
+  // at index time, rather than at query time: a document's permission should
+  // not depend on who happens to be asking, and re-deriving it per search would
+  // be a Drive round trip on every question.
+  //
+  // An unrecognised folder yields '' — indexed, but readable by nobody. That is
+  // the safe direction for a misfiled document: invisible beats public.
+  const sharedId = await db.getSharedFolderId(tenantId).catch(() => '');
+  const scope = await db.scopeForFolder(tenantId, doc.folder || '', sharedId);
+  await upsertDocumentChunks(tenantId, doc.id, points, scope);
+  await db.setDocumentScope(doc.id, scope);
   await db.markDocumentIndexed(doc.id, { chunkCount: chunks.length, contentHash: hash });
 }
 
