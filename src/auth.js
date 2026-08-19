@@ -40,7 +40,13 @@ export async function verifyToken(authHeader, { surface } = {}) {
   const tenantId = payload.tenantId || payload.tenant_id;
   if (!tenantId) throw new AuthError('token missing tenantId');
   return {
-    sub: String(payload.sub || ''),
+    // employeeRef FIRST. Eesa mints two shapes: a user token where sub is the
+    // user's id, and a gateway SERVICE token — used for every agent call —
+    // where sub is the literal string "gateway" and the acting user is carried
+    // in employeeRef. Reading sub alone meant every agent question looked like
+    // it came from a member named "gateway", found no member row, and was
+    // refused: the owner of a file was told they had no access to it.
+    sub: String(payload.employeeRef || payload.sub || ''),
     tenantId: String(tenantId),
     scopes: payload.scopes || [],
     surface: payload.surface || 'mcp',
