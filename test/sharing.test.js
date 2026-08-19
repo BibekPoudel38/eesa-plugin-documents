@@ -67,3 +67,19 @@ test('an empty scope list is never handed to the vector filter as "no filter"', 
   assert.match(src, /if \(Array\.isArray\(scopes\) && scopes\.length === 0\) return \[\]/,
     'the empty-scope short-circuit is gone — Qdrant reads should:[] as match-everything');
 });
+
+test('the sync path carries the folder, or every sync un-scopes the library', () => {
+  // upsertDocument writes `folder = excluded.folder` on conflict and defaults
+  // the field to ''. syncTenant omitted it, so a re-sync overwrote each file's
+  // folder with empty and the scope derived from it collapsed to "readable by
+  // nobody" — a correctly-scoped document silently stopped answering, with
+  // nothing in its state to show why. Observed in production: a file went from
+  // scope=member:36 to scope='' across one sync.
+  const src = readFileSync(new URL('../src/pipeline.js', import.meta.url), 'utf8');
+  const sync = src.slice(src.indexOf('export async function syncTenant'),
+                         src.indexOf('export async function indexUploaded'));
+  assert.match(sync, /folder: f\.folderId \|\| ''/,
+    'syncTenant no longer passes the folder — the next sync un-scopes everything');
+  assert.match(sync, /moved/,
+    'a file moved between folders must be re-indexed: its permission changed even though its bytes did not');
+});

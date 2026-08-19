@@ -91,8 +91,21 @@ export async function syncTenant(tenantId, providerKey = 'google_drive') {
       const { changed } = await db.upsertDocument(tenantId, {
         provider: providerKey, fileId: f.id, title: f.name, mime: f.mimeType,
         link: f.link || '', sizeBytes: f.size ?? null, contentHash: f.hash ?? null,
+        // The folder the file actually sits in, which is what the scope is
+        // derived from. Omitting it did not merely skip the field: upsert
+        // writes `folder = excluded.folder` on conflict, so every sync
+        // overwrote the stored folder with '' and un-scoped the file. A
+        // correctly-scoped document became readable by nobody the next time
+        // anything triggered a sync, with nothing in its state to show why.
+        folder: f.folderId || '',
       });
-      if (changed) { await db.enqueue(tenantId, providerKey, f.id); queued++; }
+      // Re-index when the CONTENT changed or when the file MOVED. `changed`
+      // only compares the content hash, so a file dragged from a member's
+      // folder into Shared (or out of it) would keep its old scope for ever —
+      // the permission changed even though not a byte did.
+      const prev = await db.getDocumentByFile(tenantId, providerKey, f.id);
+      const moved = !!prev && (prev.folder || '') !== (f.folderId || '');
+      if (changed || moved) { await db.enqueue(tenantId, providerKey, f.id); queued++; }
     });
     await db.setConnectionMeta(tenantId, providerKey, { status: 'connected' });
     drainQueue().catch((e) => console.warn('drain failed:', e.message)); // fire-and-forget
