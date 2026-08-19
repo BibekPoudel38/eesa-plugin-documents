@@ -64,6 +64,17 @@ app.post('/mcp', async (req, res) => {
     // "none" still reaches every document through chat, which is the whole
     // point of the permission page defeated by the back door.
     ctx.role_ = await effectiveRole(ctx);
+    // Identity, as it actually ARRIVES on the agent path. Inferring this from
+    // outcomes cost hours: "1 hit" and "0 hits" look the same whether the
+    // caller was resolved correctly, resolved as someone else, or not resolved
+    // at all. Names and ids only — never query text or document content.
+    try {
+      const scopes = await db.readableScopes(ctx.tenantId, ctx.sub);
+      console.log('[mcp] method=%s tool=%s sub=%s employeeRef=%s appRole=%s role=%s scopes=%s',
+        body?.method || '?', body?.params?.name || '-',
+        JSON.stringify(ctx.sub), JSON.stringify(ctx.raw?.employeeRef),
+        JSON.stringify(ctx.raw?.appRole), ctx.role_, JSON.stringify(scopes));
+    } catch (e) { console.warn('[mcp] identity log failed:', e.message); }
     const result = await handleRpc(body, ctx, serverInfo);
     if (isNotification || result === null) return res.status(202).end();
     return res.json({ jsonrpc: '2.0', id: body.id, result });
