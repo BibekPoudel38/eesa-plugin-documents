@@ -186,10 +186,15 @@ export async function getDocumentByFile(tenantId, provider, fileId) {
     [tenantId, provider, fileId],
   );
   const d = rows[0];
+  // Hand-rolled rather than docOut() — and that is how `folder` went missing
+  // twice: once from the SELECT, once from this object. The indexer scopes by
+  // it, so a field dropped here makes every document readable by nobody while
+  // every other signal says the file indexed fine.
   return d && {
     id: String(d.id), title: d.title, mime: d.mime, link: d.link,
     sizeBytes: d.size_bytes == null ? null : Number(d.size_bytes),
     contentHash: d.content_hash, state: d.state,
+    folder: d.folder, scope: d.scope || '',
   };
 }
 
