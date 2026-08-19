@@ -7,8 +7,16 @@ WORKDIR /app
 # An Alpine/musl base would fail to load them at runtime.
 #   ca-certificates → HTTPS model/CDN downloads (FastEmbed, Tesseract)
 #   fontconfig      → text rendering when rasterising PDF pages for OCR
+#   curl            → the deploy healthcheck, which Coolify runs INSIDE the
+#                     container. node:20-slim has neither curl nor wget, so the
+#                     check could never pass ("/bin/sh: 1: curl: not found"),
+#                     every attempt was scored unhealthy and the deploy rolled
+#                     back to the old container — with the new one booting
+#                     perfectly the whole time. Without a passing healthcheck
+#                     Coolify cannot do a wait-then-swap at all, so this ~2MB
+#                     package is what buys zero-downtime deploys.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates fontconfig \
+      ca-certificates fontconfig curl \
     && rm -rf /var/lib/apt/lists/*
 
 # `npm ci` from the committed lockfile, NOT `npm install`. Without the lockfile
