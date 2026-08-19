@@ -37,7 +37,25 @@ app.use((req, res, next) => {
   next();
 });
 
-app.get('/health', (req, res) => res.json({ ok: true, plugin: MANIFEST.slug }));
+// Readiness, not just liveness.
+//
+// This is what Coolify polls to decide when the NEW container may take over
+// from the old one, and "the process is listening" is the wrong answer to that
+// question: the schema is applied after listen(), so a container that answers
+// 200 immediately gets traffic while its columns are still being added, and
+// the first requests fail on a table the deploy is halfway through changing.
+//
+// Answering 503 until the schema is in place makes the swap wait. The old
+// container keeps serving throughout — which is the entire point, because the
+// migration is additive and the old code is happy against the new schema.
+let SCHEMA_READY = false;
+app.get('/health', (req, res) => {
+  if (!SCHEMA_READY) {
+    return res.status(503).json({ ok: false, plugin: MANIFEST.slug, ready: false,
+                                  reason: 'applying schema' });
+  }
+  res.json({ ok: true, plugin: MANIFEST.slug, ready: true });
+});
 
 // The Eesa launcher probes this to decide whether to show the app to a user,
 // and fails CLOSED when it cannot reach it — without this route the tile never
@@ -698,8 +716,13 @@ app.listen(PORT, () => {
     // After the schema, never before: the column it writes is created there.
     .then(() => db.syncMasterAdminsFromEnv())
     .then((n) => { if (n) console.log(`master admins synced from env (${n} row(s))`); })
+    .then(() => { SCHEMA_READY = true; console.log('ready'); })
     // Loud, but not fatal: a running process that can still serve /manifest and
     // report the failure beats a crash loop with no reachable diagnostics.
+    //
+    // It does NOT become ready, so a deploy whose migration failed never takes
+    // over from the container that is still working. The failure shows up as a
+    // deploy that does not go live, which is the right place to notice it.
     .catch((e) => console.error('schema apply FAILED:', e.message));
   warm();
   // Nothing to provision at boot any more — each tenant's collection is created
