@@ -201,10 +201,12 @@ export async function downloadContent(tenantId, file) {
 }
 
 // Upload a user file into the plugin-owned folder in the tenant's own Drive.
-export async function uploadFile(tenantId, { name, mimeType, buffer }) {
+export async function uploadFile(tenantId, { name, mimeType, buffer, parentId = '' }) {
   const drive = await driveFor(tenantId);
   if (!drive) throw new Error('Google Drive is not connected.');
-  const folderId = await ensureFolder(tenantId);
+  // Caller-chosen parent wins: an upload belongs in the uploader's own folder,
+  // and only falls back to the root when no one said where.
+  const folderId = parentId || await ensureFolder(tenantId);
   const res = await drive.files.create({
     requestBody: { name, parents: folderId ? [folderId] : undefined },
     media: { mimeType: mimeType || 'application/octet-stream', body: Readable.from(buffer) },

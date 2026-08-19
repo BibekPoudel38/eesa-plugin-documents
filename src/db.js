@@ -293,6 +293,59 @@ export function scopesFor(employeeRef) {
   return ['shared', `member:${ref}`];
 }
 
+/** Scopes for a caller, after checking the admin has not revoked reading.
+ *  Returns [] when read is off — which search() turns into "match nothing",
+ *  so revoking is total rather than merely hiding the folder in the UI. */
+export async function readableScopes(tenantId, employeeRef) {
+  const ref = String(employeeRef || '').trim();
+  if (!ref) return [];
+  const rows = await q(
+    `select can_read from members where tenant_id = $1 and employee_ref = $2 and active = true`,
+    [tenantId, ref]);
+  // No member row yet: they are mid-provisioning, so fall back to the default
+  // (readable). A missing row must not read as "revoked" or the first request
+  // after a grant would fail confusingly.
+  if (rows[0] && rows[0].can_read === false) return [];
+  return scopesFor(ref);
+}
+
+export async function canUpload(tenantId, employeeRef) {
+  const rows = await q(
+    `select can_upload from members where tenant_id = $1 and employee_ref = $2 and active = true`,
+    [tenantId, employeeRef]);
+  return rows[0] ? rows[0].can_upload !== false : true;
+}
+
+/** The admin panel's roster: every member, their permissions, their folder and
+ *  how much is in it. */
+export async function listMembersWithFolders(tenantId) {
+  return q(
+    `select m.employee_ref, m.name, m.email, m.role, m.active,
+            m.can_read, m.can_upload,
+            f.folder_id,
+            (select count(*) from documents d
+              where d.tenant_id = m.tenant_id
+                and d.scope = 'member:' || m.employee_ref) as doc_count
+       from members m
+       left join member_folders f
+         on f.tenant_id = m.tenant_id and f.employee_ref = m.employee_ref
+      where m.tenant_id = $1
+      order by m.created_at asc`, [tenantId]);
+}
+
+export async function setMemberPermissions(tenantId, employeeRef, { canRead, canUpload }) {
+  const rows = await q(
+    `update members
+        set can_read   = coalesce($3, can_read),
+            can_upload = coalesce($4, can_upload)
+      where tenant_id = $1 and employee_ref = $2
+      returning employee_ref, can_read, can_upload`,
+    [tenantId, employeeRef,
+     canRead === undefined ? null : !!canRead,
+     canUpload === undefined ? null : !!canUpload]);
+  return rows[0] || null;
+}
+
 export async function getMemberFolder(tenantId, employeeRef) {
   const rows = await q(
     `select * from member_folders where tenant_id = $1 and employee_ref = $2`,

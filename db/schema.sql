@@ -124,3 +124,14 @@ create table if not exists setup_links (
     created_at   timestamptz not null default now()
 );
 create index if not exists setup_links_tenant_idx on setup_links (tenant_id);
+
+
+-- Per-member permissions, set by an admin in the Documents panel.
+--
+-- Separate from `role` on purpose. Role says what someone is; these say what
+-- they may do with documents, and an admin needs to revoke one without
+-- demoting the person. Both default TRUE so granting access stays a single
+-- act — a member who exists has a folder and can use it — while revoking is
+-- explicit and visible.
+alter table members add column if not exists can_read   boolean not null default true;
+alter table members add column if not exists can_upload boolean not null default true;

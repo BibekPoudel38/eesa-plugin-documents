@@ -275,6 +275,36 @@ app.get('/api/folders', reader(), async (req, res) => {
   })) } });
 });
 
+// The admin panel's roster: who has a folder, what is in it, and what they are
+// allowed to do. Admin-only, because it lists colleagues.
+app.get('/api/members', admin(), async (req, res) => {
+  const rows = await db.listMembersWithFolders(req.ctx.tenantId);
+  res.json({ ok: true, data: rows.map((r) => ({
+    employeeRef: r.employee_ref,
+    email: r.email || r.employee_ref,
+    name: r.name || '',
+    role: r.role || 'member',
+    active: r.active !== false,
+    canRead: r.can_read !== false,
+    canUpload: r.can_upload !== false,
+    hasFolder: !!r.folder_id,
+    docCount: Number(r.doc_count || 0),
+    you: r.employee_ref === req.ctx.sub,
+  })) });
+});
+
+app.patch('/api/members/:ref', admin(), async (req, res) => {
+  const ref = String(req.params.ref || '');
+  const out = await db.setMemberPermissions(req.ctx.tenantId, ref, {
+    canRead: req.body?.canRead,
+    canUpload: req.body?.canUpload,
+  });
+  if (!out) return res.status(404).json({ ok: false, error: 'no such member' });
+  res.json({ ok: true, data: { employeeRef: out.employee_ref,
+                               canRead: out.can_read !== false,
+                               canUpload: out.can_upload !== false } });
+});
+
 app.get('/api/status', reader(), async (req, res) => {
   const [connections, counts, pending] = await Promise.all([
     db.listConnections(req.ctx.tenantId),
@@ -293,7 +323,7 @@ app.get('/api/search', reader(), async (req, res) => {
   if (!q) return res.json({ ok: true, data: [] });
   try {
     const vec = await embedQuery(q);
-    const scopes = db.scopesFor(req.ctx.sub);
+    const scopes = await db.readableScopes(req.ctx.tenantId, req.ctx.sub);
     res.json({ ok: true, data: await search(req.ctx.tenantId, vec, Math.min(Number(req.query.limit) || 8, 20), scopes) });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -302,15 +332,32 @@ app.get('/api/search', reader(), async (req, res) => {
 
 // Upload a file straight into the tenant's own Drive folder, then index it.
 // The bytes go browser → plugin → the client's cloud; Eesa never stores them.
-app.post('/api/upload', admin(), upload.single('file'), async (req, res) => {
+app.post('/api/upload', reader(), upload.single('file'), async (req, res) => {
+  // reader(), not admin(): uploading into YOUR OWN folder is not an
+  // administrative act. Whether you may do it at all is a per-member switch an
+  // admin controls, checked here.
+  if (!(await db.canUpload(req.ctx.tenantId, req.ctx.sub))) {
+    return res.status(403).json({ ok: false, error: {
+      code: 'UPLOAD_DISABLED',
+      message: 'An admin has turned off uploading for you.' } });
+  }
   const providerKey = req.body.provider || 'google_drive';
   if (!isSupported(providerKey)) return res.status(400).json({ ok: false, error: 'unsupported provider' });
   if (!req.file) return res.status(400).json({ ok: false, error: 'no file uploaded (field name must be "file")' });
   const conn = await db.getConnection(req.ctx.tenantId, providerKey);
   if (!conn) return res.status(400).json({ ok: false, error: { code: 'NOT_CONNECTED', message: 'Connect a drive first.' } });
   try {
-    const uploaded = await getProvider(providerKey).uploadFile(req.ctx.tenantId, {
-      name: req.file.originalname, mimeType: req.file.mimetype, buffer: req.file.buffer,
+    // Into the caller's OWN folder. Without a parent the file lands in the root
+    // and picks up no scope, which would make it readable by nobody and look
+    // like a failed upload.
+    const gd = getProvider(providerKey);
+    const folderId = await gd.ensureMemberFolder(req.ctx.tenantId, {
+      employeeRef: req.ctx.sub,
+      email: req.ctx.raw?.email || req.ctx.email || '',
+    });
+    const uploaded = await gd.uploadFile(req.ctx.tenantId, {
+      name: req.file.originalname, mimeType: req.file.mimetype,
+      buffer: req.file.buffer, parentId: folderId,
     });
     res.json({ ok: true, data: await pipeline.indexUploaded(req.ctx.tenantId, providerKey, uploaded) });
   } catch (e) {

@@ -77,7 +77,7 @@ async function runTool(name, args, ctx) {
     // The caller's own scopes, derived here rather than trusted from args —
     // an agent tool call is attacker-influenced text, and a scope taken from
     // it would let a question ask for someone else's folder.
-    const scopes = db.scopesFor(ctx.sub);
+    const scopes = await db.readableScopes(ctx.tenantId, ctx.sub);
     const hits = await search(ctx.tenantId, vec, Math.min(Number(args.limit) || 6, 20), scopes);
     return {
       results: hits.map((h) => ({
