@@ -186,8 +186,15 @@ app.get('/setup/:token', async (req, res) => {
 });
 
 // The provider redirects here (top-level, no bearer) — trust the signed state.
+// Google sends the user back to whatever URI was REGISTERED, which for this
+// deployment says 'google' where our provider key says 'google_drive'. Accept
+// both spellings here rather than 404 the user at the end of a consent flow
+// they already completed — the alias costs nothing and the failure it prevents
+// is the worst-placed one in the whole journey.
+const PROVIDER_ALIASES = { google: 'google_drive' };
+
 app.get('/api/connect/:provider/callback', async (req, res) => {
-  const providerKey = req.params.provider;
+  const providerKey = PROVIDER_ALIASES[req.params.provider] || req.params.provider;
   const { code, state, error } = req.query;
   if (error) return res.status(400).send(page('Connection cancelled', esc(error)));
   const st = readState(state);

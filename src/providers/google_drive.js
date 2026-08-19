@@ -25,6 +25,15 @@ const FOLDER_NAME = 'Eesa Documents';
 const INDEXABLE = /(pdf|wordprocessing|spreadsheet|sheet|presentation|csv|text\/|vnd\.google-apps\.(document|spreadsheet|presentation)|image\/(png|jpe?g))/i;
 
 function redirectUri() {
+  // Google matches the redirect URI byte-for-byte against what is registered,
+  // so the registration is the authority — not our provider key. This plugin's
+  // key is 'google_drive', but the Chups client was registered with
+  // .../api/connect/google/callback, and the console lives under an account
+  // this deployment cannot reach. Rather than leave a permanent mismatch
+  // undocumented, the exact URI is settable and the callback route accepts the
+  // alias (see server.js), so both spellings work.
+  const explicit = (process.env.GOOGLE_OAUTH_REDIRECT_URI || '').trim();
+  if (explicit) return explicit;
   const base = (process.env.PLUGIN_BASE_URL || '').replace(/\/$/, '');
   return `${base}/api/connect/${key}/callback`;
 }
