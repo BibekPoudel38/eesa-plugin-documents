@@ -5,89 +5,172 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Eesa Documents</title>
 <style>
-  :root { color-scheme: light dark; --bg:#0b1020; --card:#151b2e; --line:#26304a; --fg:#e6e9f0; --mut:#9aa4bf; --acc:#4f7cff; --ok:#2fbf71; --warn:#e2b93b; --err:#e5484d; }
-  * { box-sizing: border-box; }
-  body { margin:0; font-family: system-ui, sans-serif; background:var(--bg); color:var(--fg); }
-  .wrap { max-width: 760px; margin: 0 auto; padding: 20px; }
-  h1 { font-size: 18px; margin: 0 0 2px; }
-  .sub { color: var(--mut); font-size: 13px; margin-bottom: 18px; }
-  .card { background: var(--card); border:1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 14px; }
-  .row { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
-  button { background: var(--acc); color:#fff; border:0; border-radius:8px; padding:9px 14px; font-size:14px; cursor:pointer; }
-  button.ghost { background: transparent; border:1px solid var(--line); color:var(--fg); }
-  button:disabled { opacity:.5; cursor:default; }
-  .pill { font-size:12px; padding:3px 9px; border-radius:99px; border:1px solid var(--line); }
-  .pill.ok { color:var(--ok); border-color:var(--ok); } .pill.err { color:var(--err); border-color:var(--err); } .pill.warn{ color:var(--warn); border-color:var(--warn);}
-  .stats { display:grid; grid-template-columns: repeat(4,1fr); gap:10px; margin-top:10px; }
-  .stat { text-align:center; } .stat b { font-size:20px; display:block; } .stat span { color:var(--mut); font-size:12px; }
-  input[type=search]{ width:100%; padding:11px 13px; border-radius:9px; border:1px solid var(--line); background:#0e1425; color:var(--fg); font-size:14px; }
-  .hit { border-top:1px solid var(--line); padding:11px 0; } .hit a { color:var(--acc); text-decoration:none; font-weight:600; } .hit p{ color:var(--mut); font-size:13px; margin:4px 0 0; line-height:1.45; }
-  .muted{ color:var(--mut); font-size:13px; }
-  .frow{display:flex;align-items:center;justify-content:space-between;
-        gap:12px;padding:9px 0;border-bottom:1px solid var(--line)}
+  :root{
+    color-scheme: light dark;
+    --bg:#0b1020; --card:#141a2c; --line:#242e46; --fg:#e8ebf2; --mut:#94a0bd;
+    --acc:#4f7cff; --ok:#2fbf71; --warn:#e2b93b; --err:#f87171; --chip:#1b2338;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+       background:var(--bg);color:var(--fg);-webkit-font-smoothing:antialiased}
+  .wrap{max-width:820px;margin:0 auto;padding:20px 18px 48px}
+
+  header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:16px}
+  h1{font-size:19px;margin:0 0 3px;letter-spacing:-.01em}
+  .sub{color:var(--mut);font-size:13px;line-height:1.45}
+
+  .tabs{display:flex;gap:4px;background:var(--chip);padding:4px;border-radius:11px;margin-bottom:16px}
+  .tab{flex:1;text-align:center;padding:9px 10px;border-radius:8px;font-size:13.5px;
+       font-weight:600;color:var(--mut);cursor:pointer;border:0;background:transparent}
+  .tab[aria-selected="true"]{background:var(--card);color:var(--fg);box-shadow:0 1px 2px rgba(0,0,0,.3)}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:15px;margin-bottom:13px}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+
+  button{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:9px 14px;
+         font-size:13.5px;font-weight:600;cursor:pointer}
+  button.ghost{background:transparent;border:1px solid var(--line);color:var(--fg);font-weight:500}
+  button.ghost:hover{border-color:var(--acc)}
+  button:disabled{opacity:.45;cursor:default}
+
+  .pill{font-size:11.5px;padding:3px 9px;border-radius:99px;border:1px solid var(--line);color:var(--mut);white-space:nowrap}
+  .pill.ok{color:var(--ok);border-color:#245c40}
+  .pill.err{color:var(--err);border-color:#6b2b2b}
+  .pill.warn{color:var(--warn);border-color:#5e4d1c}
+  .pill.pub{color:#8fd6ad;border-color:#2f7d55}
+
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px}
+  .stat{text-align:center}.stat b{font-size:19px;display:block}.stat span{color:var(--mut);font-size:11.5px}
+
+  input[type=search],input[type=text]{width:100%;padding:11px 13px;border-radius:9px;
+    border:1px solid var(--line);background:#0e1425;color:var(--fg);font-size:14px}
+  input:focus{outline:0;border-color:var(--acc)}
+
+  .frow{display:flex;align-items:center;justify-content:space-between;gap:12px;
+        padding:11px 0;border-bottom:1px solid var(--line)}
   .frow:last-child{border-bottom:0}
-  .sub{color:var(--muted);font-size:12px;margin-top:2px}
-  .fmain{min-width:0}
-  .fctl{display:flex;align-items:center;gap:8px;flex-shrink:0}
+  .fmain{min-width:0;flex:1}
+  .fmain b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
+  .meta{color:var(--mut);font-size:12px;margin-top:3px;display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+  .fctl{display:flex;align-items:center;gap:7px;flex-shrink:0}
+  .fctl a{color:var(--mut);font-size:12.5px;text-decoration:none;padding:5px 8px;
+          border:1px solid var(--line);border-radius:7px}
+  .fctl a:hover{color:var(--fg);border-color:var(--acc)}
+
   .tg{display:inline-flex;align-items:center;gap:5px;padding:4px 9px;border-radius:999px;
-      border:1px solid var(--line);font-size:12px;cursor:pointer;user-select:none;
-      color:var(--muted)}
+      border:1px solid var(--line);font-size:12px;cursor:pointer;user-select:none;color:var(--mut)}
   .tg.on{border-color:#2f7d55;color:#8fd6ad}
   .tg input{margin:0;accent-color:#2f7d55}
 
+  .hit{border-top:1px solid var(--line);padding:12px 0}
+  .hit:first-child{border-top:0}
+  .hit a{color:var(--acc);text-decoration:none;font-weight:600;font-size:14px}
+  .hit p{color:var(--mut);font-size:12.5px;margin:5px 0 0;line-height:1.5}
+
+  .muted{color:var(--mut);font-size:13px}
+  .empty{color:var(--mut);font-size:13px;text-align:center;padding:26px 10px;line-height:1.55}
+  .note{font-size:12.5px;margin-top:9px;min-height:16px}
+  .note.err{color:var(--err)} .note.ok{color:var(--ok)}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .seg button{background:transparent;color:var(--mut);border-radius:0;padding:7px 12px;font-weight:500;font-size:12.5px}
+  .seg button[aria-pressed="true"]{background:var(--acc);color:#fff}
+  .hide{display:none}
+
   /* The iOS app renders this in a WebView at phone width, where a row of pills
-     beside a name has nowhere to go. Stack instead of letting it overflow. */
-  @media (max-width: 560px) {
+     beside a filename has nowhere to go. Stack instead of overflowing. */
+  @media (max-width:600px){
     body{font-size:15px}
-    .frow{flex-direction:column;align-items:flex-start;gap:8px}
+    .wrap{padding:16px 14px 40px}
+    .frow{flex-direction:column;align-items:flex-start;gap:9px}
     .fctl{width:100%;flex-wrap:wrap}
     .row{flex-direction:column;align-items:flex-start;gap:10px}
-    .card{padding:14px}
-    .tg{padding:7px 12px;font-size:13px}   /* finger-sized, not mouse-sized */
-    input[type=search]{font-size:16px}     /* <16px makes iOS zoom on focus */
+    .stats{grid-template-columns:repeat(2,1fr)}
+    .tg{padding:7px 12px;font-size:13px}          /* finger-sized, not mouse-sized */
+    input[type=search],input[type=text]{font-size:16px}  /* <16px makes iOS zoom on focus */
   }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>Eesa Documents</h1>
-  <div class="sub">Connect your Google Drive once — then find any document by meaning, in chat. Your files stay in your Drive.</div>
+  <header>
+    <div>
+      <h1>Documents</h1>
+      <div class="sub" id="lede">Your files stay in your Drive. Ask about them in chat.</div>
+    </div>
+    <span class="pill" id="connPill">…</span>
+  </header>
 
-  <div class="card" id="connCard">
-    <div class="row">
-      <div><b id="connTitle">Google Drive</b><div class="muted" id="connSub">Checking…</div></div>
-      <span class="pill" id="connPill">…</span>
-    </div>
-    <div class="stats" id="stats" style="display:none">
-      <div class="stat"><b id="cTotal">0</b><span>files</span></div>
-      <div class="stat"><b id="cIndexed">0</b><span>indexed</span></div>
-      <div class="stat"><b id="cPending">0</b><span>in queue</span></div>
-      <div class="stat"><b id="cError">0</b><span>errors</span></div>
-    </div>
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" id="tab-files"  aria-selected="true"  onclick="showTab('files')">Files</button>
+    <button class="tab" role="tab" id="tab-search" aria-selected="false" onclick="showTab('search')">Search</button>
+    <button class="tab hide" role="tab" id="tab-people" aria-selected="false" onclick="showTab('people')">People</button>
   </div>
 
-  <div class="card">
-    <div class="row">
-      <div><b>Folders</b><div class="muted" id="foldersSub">Shared is searchable by everyone. A member's folder answers only for them.</div></div>
+  <!-- FILES -->
+  <section id="pane-files">
+    <div class="card">
+      <div class="row">
+        <div>
+          <b>Add a file</b>
+          <div class="muted" id="upWhere">Uploads into your own folder — only you and admins can read it.</div>
+        </div>
+        <label class="ghost" style="cursor:pointer;padding:9px 14px;border:1px solid var(--line);border-radius:8px">
+          Choose file<input id="file" type="file" multiple style="display:none" />
+        </label>
+      </div>
+      <div class="row" style="margin-top:11px">
+        <div class="seg">
+          <button id="tgtMine"   aria-pressed="true"  onclick="setTarget('mine')">My folder</button>
+          <button id="tgtShared" aria-pressed="false" onclick="setTarget('shared')">Shared</button>
+        </div>
+        <label class="tg" id="pubWrap">
+          <input type="checkbox" id="pubOnUpload" />
+          <span>Public link</span>
+        </label>
+      </div>
+      <div class="note" id="upStatus"></div>
     </div>
-    <div id="folders" style="margin-top:10px"></div>
-  </div>
 
-  <div class="card">
-    <div class="row">
-      <div><b>Add documents</b><div class="muted">Files upload into your “Eesa Documents” Drive folder and index automatically.</div></div>
-      <label class="ghost" id="uploadLabel" style="cursor:pointer;padding:9px 14px;border:1px solid var(--line);border-radius:8px">Upload<input id="file" type="file" multiple style="display:none" /></label>
+    <div class="card">
+      <div class="row" style="margin-bottom:6px">
+        <b id="filesTitle">Your files</b>
+        <span class="pill" id="filesCount"></span>
+      </div>
+      <div id="files"><div class="empty">Loading…</div></div>
     </div>
-    <div class="muted" id="upStatus" style="margin-top:8px"></div>
-  </div>
+  </section>
 
-  <div class="card">
-    <input type="search" id="q" placeholder="Search your documents by meaning — e.g. “Q3 lease renewal”…" />
-    <div id="results"></div>
-  </div>
+  <!-- SEARCH -->
+  <section id="pane-search" class="hide">
+    <div class="card">
+      <input type="search" id="q" placeholder="Search by meaning — e.g. “Q3 lease renewal”" />
+      <div id="results"></div>
+    </div>
+  </section>
+
+  <!-- PEOPLE (admins) -->
+  <section id="pane-people" class="hide">
+    <div class="card">
+      <div class="row"><div>
+        <b>Folders &amp; permissions</b>
+        <div class="muted" id="peopleSub">Each person's folder answers only for them. Shared answers for everyone.</div>
+      </div></div>
+      <div id="folders" style="margin-top:11px"></div>
+    </div>
+    <div class="card">
+      <div class="row"><div><b>Drive</b><div class="muted" id="connSub">Checking…</div></div></div>
+      <div class="stats" id="stats" style="display:none">
+        <div class="stat"><b id="cTotal">0</b><span>files</span></div>
+        <div class="stat"><b id="cIndexed">0</b><span>indexed</span></div>
+        <div class="stat"><b id="cPending">0</b><span>in queue</span></div>
+        <div class="stat"><b id="cError">0</b><span>errors</span></div>
+      </div>
+    </div>
+  </section>
 </div>
 
 <script>
+// ---- session ---------------------------------------------------------------
 // The Eesa shell provides a UI-session token. Accept it from ?t= / #t= or an
 // injected global; the shell can be configured to pass whichever it uses.
 const params = new URLSearchParams(location.search);
@@ -102,47 +185,335 @@ let TOKEN = params.get('t') || hash.get('t') || window.__EESA_UI_TOKEN__ || '';
 //
 // (see PluginEmbed in the Eesa frontend). Reading only ?t=/#t= meant TOKEN was
 // '' inside the shell, so every call went out as `Bearer ` and the app showed
-// "Could not load status: missing bearer token" — which reads like a broken
-// plugin rather than a handshake that was never implemented.
-//
-// A URL token still wins when present, so opening the page directly with ?t=
-// keeps working for debugging.
+// "missing bearer token" — which reads like a broken plugin rather than a
+// handshake that was never implemented. A URL token still wins when present,
+// so opening the page directly with ?t= keeps working for debugging.
 window.addEventListener('message', (ev) => {
   const d = ev.data || {};
   if (d.type !== 'eesa:session' || !d.token) return;
-  // The shell posts to the plugin's own origin, so anything arriving here has
-  // already been origin-targeted by the sender; accept the first token and
-  // re-render with it.
   TOKEN = d.token;
   if (d.theme) document.documentElement.dataset.theme = d.theme;
   refresh();
 });
-
-// Announce readiness once the listener above is installed, or the shell's
-// reply can arrive before anything is listening for it.
 if (window.parent && window.parent !== window) {
   window.parent.postMessage({ type: 'eesa:plugin-ready' }, '*');
 }
 
+const $ = (id) => document.getElementById(id);
+
 async function api(path, opts = {}) {
   const r = await fetch('/api' + path, {
     ...opts,
-    headers: { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json', ...(opts.headers || {}) },
+    headers: { Authorization: 'Bearer ' + TOKEN, 'Content-Type': 'application/json', ...(opts.headers || {}) },
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error((j.error && (j.error.message || j.error)) || ('HTTP ' + r.status));
-  return j.data ?? j;
+  return j;
 }
 
-const $ = (id) => document.getElementById(id);
+function esc(t) {
+  return String(t ?? '').replace(/[&<>"']/g, (c) =>
+    ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
 
-async function refresh() {
+// alert() is unusable here. The Eesa shell embeds this page with
+// sandbox="allow-scripts allow-forms allow-same-origin allow-popups" — no
+// allow-modals — so Chrome swallows every alert silently, and a failure looked
+// like a dead button. Say it in the page instead.
+function say(id, msg, kind) {
+  const el = $(id); if (!el) return;
+  el.textContent = msg || '';
+  el.className = 'note' + (kind ? ' ' + kind : '');
+}
+
+// ---- tabs ------------------------------------------------------------------
+function showTab(name) {
+  for (const t of ['files','search','people']) {
+    $('pane-' + t).classList.toggle('hide', t !== name);
+    $('tab-' + t).setAttribute('aria-selected', String(t === name));
+  }
+  if (name === 'people') renderFolders();
+  if (name === 'search') $('q').focus();
+}
+
+// ---- state -----------------------------------------------------------------
+let YOU = { master:false, canUpload:true, canShare:true };
+let TARGET = 'mine';
+
+function setTarget(t) {
+  TARGET = t;
+  $('tgtMine').setAttribute('aria-pressed', String(t === 'mine'));
+  $('tgtShared').setAttribute('aria-pressed', String(t === 'shared'));
+  $('upWhere').textContent = t === 'shared'
+    ? 'Uploads into Shared — everyone in this workspace can read it.'
+    : 'Uploads into your own folder — only you and admins can read it.';
+}
+
+// ---- files -----------------------------------------------------------------
+async function renderFiles() {
+  const host = $('files');
   try {
-    const { connection, counts, pending } = await api('/status');
+    const res = await api('/documents?limit=100');
+    const docs = res.data || [];
+    YOU = res.you || YOU;
+
+    $('filesTitle').textContent = YOU.master ? 'All files in this workspace' : 'Your files';
+    $('lede').textContent = YOU.master
+      ? 'You are a master admin: you can see and edit every file in this workspace.'
+      : 'Your files stay in your Drive. Ask about them in chat.';
+    $('filesCount').textContent = docs.length + (docs.length === 1 ? ' file' : ' files');
+    $('tab-people').classList.toggle('hide', !YOU.master);
+    $('pubWrap').classList.toggle('hide', !YOU.canShare);
+
+    if (!docs.length) {
+      host.innerHTML = '<div class="empty">No files yet.<br>Upload one above, or send a file to Eesa in chat.</div>';
+      return;
+    }
+    host.innerHTML = docs.map(fileRow).join('');
+  } catch (e) {
+    host.innerHTML = '<div class="empty">Could not load files: ' + esc(e.message) + '</div>';
+  }
+}
+
+function fileRow(d) {
+  const where = d.shared ? 'Shared' : (d.owned ? 'Your folder' : 'Another folder');
+  const state = d.state === 'indexed' ? '' :
+    '<span class="pill ' + (d.state === 'error' ? 'err' : 'warn') + '">' + esc(d.state) + '</span>';
+  const pub = d.publicUrl ? '<span class="pill pub">Public</span>' : '';
+  const acts = [];
+  acts.push('<a href="' + esc(d.link) + '" target="_blank" rel="noopener">Open</a>');
+  if (d.downloadUrl) acts.push('<a href="' + esc(d.downloadUrl) + '" target="_blank" rel="noopener">Download</a>');
+  if (d.canEdit && YOU.canShare) {
+    acts.push(d.publicUrl
+      ? '<button class="ghost" onclick="share(this,\'' + esc(d.id) + '\',false)">Unshare</button>'
+      : '<button class="ghost" onclick="share(this,\'' + esc(d.id) + '\',true)">Share link</button>');
+  }
+  if (d.canEdit) {
+    acts.push('<button class="ghost" onclick="rename(this,\'' + esc(d.id) + '\')">Rename</button>');
+    acts.push('<button class="ghost" onclick="remove(this,\'' + esc(d.id) + '\')">Delete</button>');
+  }
+  return '<div class="frow" data-id="' + esc(d.id) + '">'
+    + '<div class="fmain"><b>' + esc(d.title || 'Untitled') + '</b>'
+    + '<div class="meta"><span>' + esc(where) + '</span>' + state + pub + '</div>'
+    + '<div class="note" id="n-' + esc(d.id) + '"></div></div>'
+    + '<div class="fctl">' + acts.join('') + '</div></div>';
+}
+
+async function share(btn, id, want) {
+  btn.disabled = true;
+  try {
+    const res = await api('/documents/' + encodeURIComponent(id) + '/share', {
+      method: 'POST', body: JSON.stringify({ public: want }),
+    });
+    if (want) {
+      const url = (res.data && (res.data.link || res.data.publicUrl)) || '';
+      // Copy is a convenience; showing the URL is the guarantee. A clipboard
+      // write can be refused inside a sandboxed iframe, and a "Copied!" that
+      // silently did nothing is worse than no button.
+      let copied = false;
+      try { await navigator.clipboard.writeText(url); copied = true; } catch (e) { /* shown below instead */ }
+      say('n-' + id, (copied ? 'Link copied — ' : 'Public link: ') + url, 'ok');
+    } else {
+      say('n-' + id, 'Public link revoked.', 'ok');
+    }
+    setTimeout(renderFiles, 1400);
+  } catch (e) {
+    say('n-' + id, 'Could not change sharing: ' + e.message, 'err');
+  }
+  btn.disabled = false;
+}
+
+async function rename(btn, id) {
+  const row = btn.closest('.frow');
+  const cur = row.querySelector('b').textContent;
+  // prompt() is a modal too — same sandbox problem as alert(). Edit in place.
+  const box = document.createElement('input');
+  box.type = 'text'; box.value = cur; box.style.marginTop = '6px';
+  const main = row.querySelector('.fmain');
+  main.appendChild(box); box.focus(); box.select();
+  const done = async (commit) => {
+    const name = box.value.trim();
+    box.remove();
+    if (!commit || !name || name === cur) return;
+    try {
+      await api('/documents/' + encodeURIComponent(id), {
+        method: 'PATCH', body: JSON.stringify({ title: name }),
+      });
+      renderFiles();
+    } catch (e) { say('n-' + id, 'Rename failed: ' + e.message, 'err'); }
+  };
+  box.onkeydown = (e) => { if (e.key === 'Enter') done(true); if (e.key === 'Escape') done(false); };
+  box.onblur = () => done(true);
+}
+
+async function remove(btn, id) {
+  // Two-step rather than a modal confirm: the button becomes the confirmation.
+  if (btn.dataset.armed !== '1') {
+    btn.dataset.armed = '1';
+    btn.textContent = 'Confirm?';
+    say('n-' + id, 'This moves the file to Drive’s trash. Click again to confirm.', 'err');
+    setTimeout(() => {
+      if (btn.dataset.armed === '1') { btn.dataset.armed = ''; btn.textContent = 'Delete'; say('n-' + id, ''); }
+    }, 5000);
+    return;
+  }
+  btn.disabled = true;
+  try {
+    await api('/documents/' + encodeURIComponent(id), { method: 'DELETE' });
+    renderFiles();
+  } catch (e) {
+    say('n-' + id, 'Delete failed: ' + e.message, 'err');
+    btn.disabled = false; btn.dataset.armed = ''; btn.textContent = 'Delete';
+  }
+}
+
+// ---- upload ----------------------------------------------------------------
+// Raw fetch: FormData sets its own multipart Content-Type — don't force JSON.
+$('file').onchange = async (e) => {
+  const files = [...e.target.files]; e.target.value = '';
+  for (const f of files) {
+    say('upStatus', 'Uploading ' + f.name + '…');
+    try {
+      const fd = new FormData();
+      fd.append('file', f);
+      fd.append('target', TARGET);
+      if ($('pubOnUpload').checked) fd.append('public', 'true');
+      const r = await fetch('/api/upload', {
+        method: 'POST', headers: { Authorization: 'Bearer ' + TOKEN }, body: fd,
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((j.error && (j.error.message || j.error)) || ('HTTP ' + r.status));
+      const link = j.data && j.data.public && j.data.public.link;
+      say('upStatus', 'Uploaded ' + f.name + ' — indexing…' + (link ? ' Public link: ' + link : ''), 'ok');
+    } catch (err) {
+      say('upStatus', 'Upload failed: ' + err.message, 'err');
+    }
+  }
+  setTimeout(refresh, 1400);
+};
+
+// ---- search ----------------------------------------------------------------
+let searchTimer;
+$('q').oninput = (e) => {
+  clearTimeout(searchTimer);
+  const q = e.target.value.trim();
+  if (!q) { $('results').innerHTML = ''; return; }
+  searchTimer = setTimeout(async () => {
+    try {
+      const hits = (await api('/search?q=' + encodeURIComponent(q))).data || [];
+      $('results').innerHTML = hits.length
+        ? hits.map((h) =>
+            '<div class="hit"><a href="' + esc(h.link) + '" target="_blank" rel="noopener">'
+            + esc(h.title || 'Untitled') + '</a>'
+            + (h.downloadUrl ? ' <a href="' + esc(h.downloadUrl) + '" target="_blank" rel="noopener" style="font-size:12px">download</a>' : '')
+            + '<p>' + esc((h.snippet || '').slice(0, 260)) + '</p></div>').join('')
+        : '<div class="hit muted">No matches in the documents you can read.</div>';
+    } catch (err) {
+      $('results').innerHTML = '<div class="hit muted">' + esc(err.message) + '</div>';
+    }
+  }, 280);
+};
+
+// ---- people (master admin) --------------------------------------------------
+// This lists FOLDERS, never their contents — who has a folder is directory
+// information; what is inside it is not.
+async function renderFolders() {
+  const host = $('folders');
+  if (!host) return;
+  try {
+    const { data } = await api('/folders');
+    const { shared } = data;
+    let html = frow('Shared', 'everyone in this workspace', shared.docCount, true);
+    let members = null;
+    try { members = await api('/members'); } catch (e) { /* not an admin */ }
+    if (members) {
+      for (const m of members.data) html += memberRow(m, members.youAreMaster);
+      $('peopleSub').textContent = members.data.length
+        + ' member' + (members.data.length === 1 ? '' : 's')
+        + ' — each folder answers only for that person.';
+    } else {
+      for (const f of data.folders) {
+        html += frow(f.email + (f.mine ? ' (you)' : ''), 'your folder', f.docCount ?? null, false);
+      }
+    }
+    host.innerHTML = html;
+  } catch (e) {
+    host.innerHTML = '<div class="empty">Folders unavailable: ' + esc(e.message) + '</div>';
+  }
+}
+
+function frow(title, sub, count, isShared) {
+  return '<div class="frow"><div class="fmain"><b>' + esc(title) + '</b>'
+    + '<div class="meta">' + esc(sub) + '</div></div>'
+    + '<span class="pill' + (isShared ? ' ok' : '') + '">'
+    + (count === null ? 'folder' : count + ' file' + (count === 1 ? '' : 's'))
+    + '</span></div>';
+}
+
+// One member: who they are, what is in their folder, and the switches an admin
+// needs. Read/Upload separately rather than one Access toggle, because revoking
+// upload while leaving read is the common case — a leaver keeps answering
+// questions, adds nothing new.
+function memberRow(m, youAreMaster) {
+  const who = esc(m.email) + (m.you ? ' (you)' : '');
+  const meta = [m.name, m.role].filter(Boolean).map(esc).join(' · ')
+    || (m.hasFolder ? 'folder ready' : 'no folder yet');
+  const masterPill = m.master ? '<span class="pill pub">Master</span>' : '';
+  return '<div class="frow" data-ref="' + esc(m.employeeRef) + '">'
+    + '<div class="fmain"><b>' + who + '</b><div class="meta">' + meta + masterPill + '</div>'
+    + '<div class="note" id="p-' + esc(m.employeeRef) + '"></div></div>'
+    + '<div class="fctl">'
+    + '<span class="pill">' + m.docCount + ' file' + (m.docCount === 1 ? '' : 's') + '</span>'
+    + toggle(m.employeeRef, 'canRead', m.canRead, 'Read')
+    + toggle(m.employeeRef, 'canUpload', m.canUpload, 'Upload')
+    + (youAreMaster ? toggle(m.employeeRef, 'master', m.master, 'All files') : '')
+    + '</div></div>';
+}
+
+function toggle(ref, field, on, label) {
+  return '<label class="tg' + (on ? ' on' : '') + '">'
+    + '<input type="checkbox" ' + (on ? 'checked' : '')
+    + ' onchange="setPerm(this,\'' + esc(ref) + '\',\'' + field + '\')" />'
+    + '<span>' + esc(label) + '</span></label>';
+}
+
+async function setPerm(el, ref, field) {
+  const wrap = el.closest('.tg');
+  const want = el.checked;
+  el.disabled = true;
+  try {
+    if (field === 'master') {
+      await api('/members/' + encodeURIComponent(ref) + '/master', {
+        method: 'PATCH', body: JSON.stringify({ master: want }),
+      });
+    } else {
+      await api('/members/' + encodeURIComponent(ref), {
+        method: 'PATCH', body: JSON.stringify({ [field]: want }),
+      });
+    }
+    wrap.classList.toggle('on', want);
+    say('p-' + ref, '');
+  } catch (e) {
+    // Put the switch back: a control that looks changed but did not save is
+    // worse than one that refuses, because the admin walks away believing it.
+    el.checked = !want;
+    say('p-' + ref, 'Could not change that: ' + e.message, 'err');
+  }
+  el.disabled = false;
+}
+
+// ---- refresh ---------------------------------------------------------------
+async function refresh() {
+  if (!TOKEN) return;
+  renderFiles();
+  try {
+    const { data } = await api('/status');
+    const { connection, counts, pending } = data;
     const connected = connection && connection.status !== 'disconnected';
-    $('connPill').className = 'pill ' + (connection?.status === 'error' ? 'err' : connection?.status === 'syncing' ? 'warn' : connected ? 'ok' : '');
-    $('connPill').textContent = connection ? connection.status : 'not connected';
-    renderFolders();
+    const pill = $('connPill');
+    pill.className = 'pill ' + (connection?.status === 'error' ? 'err'
+      : connection?.status === 'syncing' ? 'warn' : connected ? 'ok' : '');
+    pill.textContent = connection ? connection.status : 'not connected';
     $('connSub').textContent = connected ? (connection.accountEmail || 'connected') : 'Not connected yet';
     $('stats').style.display = connected ? 'grid' : 'none';
     $('cTotal').textContent = counts.total; $('cIndexed').textContent = counts.indexed;
@@ -152,139 +523,10 @@ async function refresh() {
   }
 }
 
-// alert() is unusable here. The Eesa shell embeds this page with
-// sandbox="allow-scripts allow-forms allow-same-origin allow-popups" — no
-// allow-modals — so Chrome swallows every alert silently. Connect failing
-// therefore looked like a dead button: no popup, no message, no console error.
-// Say it in the page instead.
-function showError(msg) {
-  const el = $('connSub');
-  el.textContent = msg;
-  el.style.color = '#f87171';
-}
-
-// No connect/sync controls here by design. The workspace's Drive is connected
-// ONCE, out of band, by whoever administers the tenant — a person opening this
-// page is here to see documents, not to perform setup, and a connect button in
-// everyone's view is an invitation to a second connection this plugin does not
-// support (connections are unique per tenant+provider).
-
-// The folder directory. An admin sees every member's folder; a member sees
-// their own. Either way this lists FOLDERS, never their contents — who has a
-// folder is directory information, what is inside it is not.
-async function renderFolders() {
-  const host = $('folders');
-  if (!host) return;
-  try {
-    const { shared, folders } = await api('/folders');
-    let html = frow('Shared', 'everyone in this workspace', shared.docCount, true);
-    // Admins get the roster with controls; everyone else sees their own folder.
-    let members = null;
-    try { members = await api('/members'); } catch { /* not an admin */ }
-    if (members) {
-      for (const m of members) html += memberRow(m);
-      $('foldersSub').textContent =
-        members.length + ' member' + (members.length === 1 ? '' : 's')
-        + ' — each folder answers only for that person.';
-    } else {
-      for (const f of folders) {
-        html += frow(f.email + (f.mine ? ' (you)' : ''), 'your folder', f.docCount ?? null, false);
-      }
-    }
-    host.innerHTML = html;
-  } catch (e) {
-    host.innerHTML = '<div class="sub">Folders unavailable: ' + esc(e.message) + '</div>';
-  }
-}
-
-function esc(t) {
-  return String(t).replace(/[&<>"]/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-}
-
-function frow(title, sub, count, isShared) {
-  return '<div class="frow"><div class="fmain"><b>' + esc(title) + '</b>'
-    + '<div class="sub">' + esc(sub) + '</div></div>'
-    + '<span class="pill' + (isShared ? ' ok' : '') + '">'
-    + (count === null ? 'folder' : count + ' file' + (count === 1 ? '' : 's'))
-    + '</span></div>';
-}
-
-// One member: who they are, what is in their folder, and the two switches an
-// admin actually needs. Labelled "Read"/"Upload" rather than a single Access
-// toggle, because revoking upload while leaving read is the common case — a
-// leaver keeps answering questions, adds nothing new.
-function memberRow(m) {
-  const who = esc(m.email) + (m.you ? ' (you)' : '');
-  const meta = [m.name, m.role].filter(Boolean).map(esc).join(' · ')
-    || (m.hasFolder ? 'folder ready' : 'no folder yet');
-  return '<div class="frow" data-ref="' + esc(m.employeeRef) + '">'
-    + '<div class="fmain"><b>' + who + '</b><div class="sub">' + meta + '</div></div>'
-    + '<div class="fctl">'
-    + '<span class="pill">' + m.docCount + ' file' + (m.docCount === 1 ? '' : 's') + '</span>'
-    + toggle(m.employeeRef, 'canRead', m.canRead, 'Read')
-    + toggle(m.employeeRef, 'canUpload', m.canUpload, 'Upload')
-    + '</div></div>';
-}
-
-function toggle(ref, field, on, label) {
-  return '<label class="tg' + (on ? ' on' : '') + '">'
-    + '<input type="checkbox" ' + (on ? 'checked' : '')
-    + ' onchange="setPerm(this,\'' + esc(ref) + '\',\'' + field + '\')" />'
-    + '<span>' + label + '</span></label>';
-}
-
-async function setPerm(el, ref, field) {
-  const wrap = el.closest('.tg');
-  const want = el.checked;
-  el.disabled = true;
-  try {
-    await api('/members/' + encodeURIComponent(ref), {
-      method: 'PATCH', body: JSON.stringify({ [field]: want }),
-    });
-    wrap.classList.toggle('on', want);
-  } catch (e) {
-    // Put the switch back: a control that looks changed but did not save is
-    // worse than one that refuses, because the admin walks away believing it.
-    el.checked = !want;
-    showError('Could not change that: ' + e.message);
-  }
-  el.disabled = false;
-}
-
-// Upload: raw fetch (FormData sets its own multipart Content-Type — don't force JSON).
-$('file').onchange = async (e) => {
-  const files = [...e.target.files]; e.target.value = '';
-  for (const f of files) {
-    $('upStatus').textContent = `Uploading ${f.name}…`;
-    try {
-      const fd = new FormData(); fd.append('file', f);
-      const r = await fetch('/api/upload', { method: 'POST', headers: { 'Authorization': 'Bearer ' + TOKEN }, body: fd });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error((j.error && (j.error.message || j.error)) || ('HTTP ' + r.status));
-      $('upStatus').textContent = `Uploaded ${f.name} ✓ — indexing…`;
-    } catch (err) { $('upStatus').textContent = `Upload failed: ${err.message}`; }
-  }
-  setTimeout(refresh, 1200);
-};
-
-let t;
-$('q').oninput = (e) => {
-  clearTimeout(t);
-  const q = e.target.value.trim();
-  if (!q) { $('results').innerHTML = ''; return; }
-  t = setTimeout(async () => {
-    try {
-      const hits = await api('/search?q=' + encodeURIComponent(q));
-      $('results').innerHTML = hits.length
-        ? hits.map((h) => `<div class="hit"><a href="${h.link}" target="_blank" rel="noopener">${h.title || 'Untitled'}</a><p>${(h.snippet || '').slice(0, 260)}</p></div>`).join('')
-        : '<div class="hit muted">No matches.</div>';
-    } catch (err) { $('results').innerHTML = '<div class="hit muted">' + err.message + '</div>'; }
-  }, 280);
-};
-
 refresh();
-setInterval(refresh, 8000);
+// Slow poll: enough to show indexing finishing, not so much that a phone on
+// mobile data pays for it.
+setInterval(refresh, 12000);
 </script>
 </body>
 </html>

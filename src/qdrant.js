@@ -130,6 +130,9 @@ export async function upsertDocumentChunks(tenantId, documentId, chunks, scope =
       text: ch.text,
       title: ch.title,
       link: ch.link,
+      // Stamped so download links do not depend on parsing the view URL
+      // forever; the parser stays for chunks indexed before this existed.
+      file_id: ch.fileId || fileIdFromLink(ch.link),
       // Who this chunk may answer for. See search(): an empty scope matches
       // nobody, so a document indexed before scoping existed stays invisible
       // until it is re-synced rather than silently becoming readable by all.
@@ -161,6 +164,18 @@ export async function dropTenant(tenantId) {
 }
 
 // Semantic search, tenant-scoped. Returns one hit per document (best chunk).
+/** The Drive file id behind an indexed chunk.
+ *
+ *  Chunks indexed before download links existed carry no file_id, and
+ *  re-indexing every tenant to add one would be a lot of embedding spend for a
+ *  field the link already contains. Prefer the payload when it is there, parse
+ *  the link when it is not. */
+export function fileIdFromLink(link) {
+  const m = /\/d\/([A-Za-z0-9_-]{10,})/.exec(String(link || ''))
+    || /[?&]id=([A-Za-z0-9_-]{10,})/.exec(String(link || ''));
+  return m ? m[1] : '';
+}
+
 export async function search(tenantId, vector, limit = 6, scopes = null) {
   // A caller with NO readable scopes reads nothing — short-circuit before the
   // query. This is not an optimisation: Qdrant treats `should: []` as an empty
@@ -220,6 +235,7 @@ export async function search(tenantId, vector, limit = 6, scopes = null) {
       documentId: docId,
       title: r.payload.title,
       link: r.payload.link,
+      fileId: r.payload.file_id || fileIdFromLink(r.payload.link),
       snippet: r.payload.text,
     });
     if (out.length >= limit) break;

@@ -135,3 +135,28 @@ create index if not exists setup_links_tenant_idx on setup_links (tenant_id);
 -- explicit and visible.
 alter table members add column if not exists can_read   boolean not null default true;
 alter table members add column if not exists can_upload boolean not null default true;
+
+
+-- Public sharing state for a document.
+--
+-- A file is private until someone deliberately publishes it, so the default is
+-- the empty string rather than NULL: "not shared" is a value we compare, not a
+-- gap we have to keep null-checking. `shared_by` records WHO published it,
+-- because "this file is on the public internet" is exactly the kind of fact
+-- that needs an owner when someone asks later.
+alter table documents add column if not exists public_url text not null default '';
+alter table documents add column if not exists shared_by  text not null default '';
+alter table documents add column if not exists shared_at  timestamptz;
+
+
+-- Master admin: sees every folder, edits every file.
+--
+-- This cannot be inferred from the platform role. In the live workspace BOTH
+-- the owner and an ordinary member carry Eesa role 'ADMIN', and the plugin's
+-- own effectiveRole() falls back to "admin" for anyone holding a member row
+-- while per-app roles are dormant. Gating "see everything" on either of those
+-- would hand every member the whole workspace.
+--
+-- So it is an explicit flag, defaulting FALSE, granted deliberately — seeded
+-- from DOCUMENTS_MASTER_ADMINS at boot and visible in the roster.
+alter table members add column if not exists is_master boolean not null default false;

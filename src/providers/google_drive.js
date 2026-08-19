@@ -226,3 +226,97 @@ export async function uploadFile(tenantId, { name, mimeType, buffer, parentId = 
   });
   return normalize(res.data);
 }
+
+// ---- sharing & file edits -------------------------------------------------
+// Drive's own link is only reachable by someone with access to the file, so a
+// "share this with a customer" link has to be an explicit permission grant.
+// These are the only calls in the plugin that change anything in the client's
+// Drive, and each one is gated upstream by ownership or master admin.
+
+/** A direct-download URL for a Drive file id. `webContentLink` is only present
+ *  for binary files (a Google Doc has no bytes to stream), so build the stable
+ *  form ourselves rather than returning undefined for half the library. */
+export function downloadUrlFor(fileId) {
+  return fileId ? `https://drive.google.com/uc?export=download&id=${fileId}` : '';
+}
+
+export function viewUrlFor(fileId) {
+  return fileId ? `https://drive.google.com/file/d/${fileId}/view` : '';
+}
+
+/** Publish: anyone with the link may read. Returns the shareable URLs.
+ *  Idempotent — Drive answers with an error we treat as success when the
+ *  permission is already there, so re-sharing is not a failure. */
+export async function makePublic(tenantId, fileId) {
+  const drive = await driveFor(tenantId);
+  if (!drive) throw new Error('Google Drive is not connected.');
+  try {
+    await drive.permissions.create({
+      fileId,
+      requestBody: { role: 'reader', type: 'anyone' },
+      // Without this the call succeeds and the link still 403s for anyone who
+      // is not signed into the workspace.
+      supportsAllDrives: true,
+    });
+  } catch (e) {
+    const msg = String(e?.message || '');
+    // "already has access" / duplicate permission — the desired end state.
+    if (!/already|duplicate/i.test(msg)) throw e;
+  }
+  const res = await drive.files.get({
+    fileId, fields: 'id,name,webViewLink,webContentLink',
+  });
+  return {
+    fileId,
+    name: res.data.name,
+    viewUrl: res.data.webViewLink || viewUrlFor(fileId),
+    downloadUrl: res.data.webContentLink || downloadUrlFor(fileId),
+  };
+}
+
+/** Un-publish: drop every "anyone" permission, leaving named access intact. */
+export async function makePrivate(tenantId, fileId) {
+  const drive = await driveFor(tenantId);
+  if (!drive) throw new Error('Google Drive is not connected.');
+  const list = await drive.permissions.list({
+    fileId, fields: 'permissions(id,type,role)', supportsAllDrives: true,
+  });
+  const anyone = (list.data.permissions || []).filter((p) => p.type === 'anyone');
+  for (const p of anyone) {
+    await drive.permissions.delete({ fileId, permissionId: p.id, supportsAllDrives: true });
+  }
+  return { fileId, revoked: anyone.length };
+}
+
+/** Is this file currently public? Read from Drive, not from our mirror — the
+ *  answer that matters is the one Google will act on. */
+export async function isPublic(tenantId, fileId) {
+  const drive = await driveFor(tenantId);
+  if (!drive) return false;
+  const list = await drive.permissions.list({
+    fileId, fields: 'permissions(id,type)', supportsAllDrives: true,
+  });
+  return (list.data.permissions || []).some((p) => p.type === 'anyone');
+}
+
+export async function renameFile(tenantId, fileId, name) {
+  const drive = await driveFor(tenantId);
+  if (!drive) throw new Error('Google Drive is not connected.');
+  const res = await drive.files.update({
+    fileId, requestBody: { name: String(name).slice(0, 300) },
+    fields: 'id,name,webViewLink', supportsAllDrives: true,
+  });
+  return { fileId, name: res.data.name };
+}
+
+/** Trash rather than destroy. A delete in a shared workspace is someone else's
+ *  document as often as it is your own, and Drive's own trash is a 30-day undo
+ *  that costs nothing to keep. */
+export async function trashFile(tenantId, fileId) {
+  const drive = await driveFor(tenantId);
+  if (!drive) throw new Error('Google Drive is not connected.');
+  await drive.files.update({
+    fileId, requestBody: { trashed: true }, supportsAllDrives: true,
+  });
+  return { fileId, trashed: true };
+}

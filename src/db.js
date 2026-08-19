@@ -150,6 +150,8 @@ const docOut = (d) =>
     // looking perfectly healthy everywhere else — without this the only way to
     // notice was to read Qdrant payloads by hand.
     scope: d.scope || '',
+    publicUrl: d.public_url || '',
+    sharedBy: d.shared_by || '',
     state: d.state,
     chunkCount: d.chunk_count,
     indexedAt: iso(d.indexed_at),
@@ -210,24 +212,93 @@ export async function markDocumentState(id, state, error = '') {
   await q(`update documents set state = $2, error = $3, updated_at = now() where id = $1`, [id, state, String(error).slice(0, 2000)]);
 }
 
-export async function listDocuments(tenantId, { limit = 50 } = {}) {
-  const rows = await q(
-    `select * from documents where tenant_id = $1 order by updated_at desc limit $2`,
-    [tenantId, Math.max(1, Math.min(limit, 500))],
-  );
-  return rows.map(docOut);
+/** Documents this caller may see.
+ *
+ *  `scopes` is REQUIRED to be passed explicitly — null means "every scope",
+ *  which only a master admin may ask for. It used to take no scopes at all and
+ *  return the whole tenant, so every member listing their documents got
+ *  everybody's: the same leak search had, on a route nobody thought of as a
+ *  search. An empty array matches nothing, which is the safe direction and
+ *  mirrors what the vector filter does with no scopes.
+ */
+export async function listDocuments(tenantId, { limit = 50, scopes } = {}) {
+  const n = Math.max(1, Math.min(limit, 500));
+  if (scopes === null) {
+    return (await q(
+      `select * from documents where tenant_id = $1 order by updated_at desc limit $2`,
+      [tenantId, n])).map(docOut);
+  }
+  const list = Array.isArray(scopes) ? scopes : [];
+  if (!list.length) return [];
+  return (await q(
+    `select * from documents
+      where tenant_id = $1 and scope = any($2::text[])
+      order by updated_at desc limit $3`,
+    [tenantId, list, n])).map(docOut);
 }
 
-export async function findDocument(tenantId, ref) {
-  // by uuid id, else by title (case-insensitive contains)
-  const byId = /^[0-9a-f-]{36}$/i.test(ref)
-    ? await q(`select * from documents where tenant_id = $1 and id = $2`, [tenantId, ref])
-    : [];
-  if (byId[0]) return docOut(byId[0]);
+/** One document by id, refused unless it is in the caller's scopes.
+ *  null scopes = master admin = any document in the tenant. */
+export async function getDocument(tenantId, id, scopes) {
+  if (!/^[0-9a-f-]{36}$/i.test(String(id || ''))) return null;
+  if (scopes === null) {
+    return docOut((await q(
+      `select * from documents where tenant_id = $1 and id = $2`, [tenantId, id]))[0]);
+  }
+  const list = Array.isArray(scopes) ? scopes : [];
+  if (!list.length) return null;
+  return docOut((await q(
+    `select * from documents
+      where tenant_id = $1 and id = $2 and scope = any($3::text[])`,
+    [tenantId, id, list]))[0]);
+}
+
+/** Record that a file was published (or un-published). */
+export async function setDocumentPublic(tenantId, id, { publicUrl = '', sharedBy = '' } = {}) {
+  const rows = await q(
+    `update documents
+        set public_url = $3,
+            shared_by  = case when $3 = '' then '' else $4 end,
+            shared_at  = case when $3 = '' then null else now() end,
+            updated_at = now()
+      where tenant_id = $1 and id = $2
+      returning *`,
+    [tenantId, id, publicUrl, sharedBy]);
+  return docOut(rows[0]);
+}
+
+export async function deleteDocumentRow(tenantId, id) {
+  await q(`delete from documents where tenant_id = $1 and id = $2`, [tenantId, id]);
+}
+
+export async function renameDocument(tenantId, id, title) {
+  const rows = await q(
+    `update documents set title = $3, updated_at = now()
+      where tenant_id = $1 and id = $2 returning *`,
+    [tenantId, id, String(title).slice(0, 500)]);
+  return docOut(rows[0]);
+}
+
+/** Find a document by id or title — within the caller's scopes.
+ *  Unscoped, this answered "get me the link to <name>" for ANY file in the
+ *  workspace, which handed one member another member's document by title. */
+export async function findDocument(tenantId, ref, scopes) {
+  const all = scopes === null;
+  const list = Array.isArray(scopes) ? scopes : [];
+  if (!all && !list.length) return null;
+  const scopeSql = all ? '' : ' and scope = any($3::text[])';
+  const args = (extra) => (all ? [tenantId, extra] : [tenantId, extra, list]);
+
+  if (/^[0-9a-f-]{36}$/i.test(ref)) {
+    const byId = await q(
+      `select * from documents where tenant_id = $1 and id = $2${scopeSql}`, args(ref));
+    if (byId[0]) return docOut(byId[0]);
+  }
   const byTitle = await q(
-    `select * from documents where tenant_id = $1 and title ilike $2 order by updated_at desc limit 1`,
-    [tenantId, `%${ref}%`],
-  );
+    `select * from documents
+      where tenant_id = $1 and title ilike $2${scopeSql}
+      order by updated_at desc limit 1`,
+    args(`%${ref}%`));
   return docOut(byTitle[0]);
 }
 
@@ -336,7 +407,7 @@ export async function canUpload(tenantId, employeeRef) {
 export async function listMembersWithFolders(tenantId) {
   return q(
     `select m.employee_ref, m.name, m.email, m.role, m.active,
-            m.can_read, m.can_upload,
+            m.can_read, m.can_upload, m.is_master,
             f.folder_id,
             (select count(*) from documents d
               where d.tenant_id = m.tenant_id
@@ -346,6 +417,64 @@ export async function listMembersWithFolders(tenantId) {
          on f.tenant_id = m.tenant_id and f.employee_ref = m.employee_ref
       where m.tenant_id = $1
       order by m.created_at asc`, [tenantId]);
+}
+
+/** Is this caller a master admin — every folder, every file, edit rights?
+ *
+ *  Deliberately NOT derived from any role. In the live workspace both the
+ *  owner and an ordinary member carry Eesa role 'ADMIN', and the plugin's
+ *  effectiveRole() falls back to "admin" for anyone with a member row, so
+ *  either signal would promote everybody. Two explicit sources instead:
+ *  the DB flag, and the DOCUMENTS_MASTER_ADMINS env list (by email or by
+ *  employee ref, since a downstream token does not always carry an email).
+ */
+const MASTER_ENV = String(process.env.DOCUMENTS_MASTER_ADMINS || '')
+  .split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+
+export function isMasterByEnv({ employeeRef = '', email = '' } = {}) {
+  if (!MASTER_ENV.length) return false;
+  const ref = String(employeeRef || '').trim().toLowerCase();
+  const em = String(email || '').trim().toLowerCase();
+  return (!!ref && MASTER_ENV.includes(ref)) || (!!em && MASTER_ENV.includes(em));
+}
+
+export async function isMasterAdmin(tenantId, employeeRef, email = '') {
+  if (isMasterByEnv({ employeeRef, email })) return true;
+  const rows = await q(
+    `select is_master, email from members
+      where tenant_id = $1 and employee_ref = $2 and active = true`,
+    [tenantId, employeeRef]);
+  if (!rows[0]) return false;
+  // The stored email counts too: the env list is written by a human who knows
+  // people by address, while a token may only carry an id.
+  return rows[0].is_master === true || isMasterByEnv({ email: rows[0].email });
+}
+
+export async function setMasterAdmin(tenantId, employeeRef, isMaster) {
+  const rows = await q(
+    `update members set is_master = $3
+      where tenant_id = $1 and employee_ref = $2
+      returning employee_ref, is_master`,
+    [tenantId, employeeRef, !!isMaster]);
+  return rows[0] || null;
+}
+
+/** Seed the env-named master admins onto their member rows, so the roster
+ *  shows the truth rather than a flag that only exists in an env var.
+ *  Idempotent: safe on every boot. */
+export async function syncMasterAdminsFromEnv() {
+  if (!MASTER_ENV.length) return 0;
+  // Across every tenant: the env list names people, and a person is a master
+  // admin of the workspace they belong to. isMasterAdmin() consults the env
+  // directly too, so this is about the roster telling the truth rather than
+  // about enforcement — enforcement never depends on this having run.
+  const rows = await q(
+    `update members set is_master = true
+      where is_master = false
+        and (lower(email) = any($1::text[]) or lower(employee_ref) = any($1::text[]))
+      returning tenant_id, employee_ref`,
+    [MASTER_ENV]);
+  return rows.length;
 }
 
 export async function setMemberPermissions(tenantId, employeeRef, { canRead, canUpload }) {

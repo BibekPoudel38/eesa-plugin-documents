@@ -18,7 +18,9 @@ import { handleRpc } from './mcp.js';
 // app.listen() at import, so nothing defined here is reachable from a test.
 import { esc, page, makeState, readState } from './web.js';
 import { embedQuery, warm } from './embed.js';
-import { search, ping as qdrantPing } from './qdrant.js';
+import { search, ping as qdrantPing, deleteDocument as qdrantDelete } from './qdrant.js';
+
+const gdrive = () => getProvider('google_drive');
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MANIFEST = JSON.parse(readFileSync(join(__dirname, '..', 'manifest.json'), 'utf-8'));
@@ -362,7 +364,9 @@ app.post('/api/members', (req, res, next) => {
 // allowed to do. Admin-only, because it lists colleagues.
 app.get('/api/members', admin(), async (req, res) => {
   const rows = await db.listMembersWithFolders(req.ctx.tenantId);
-  res.json({ ok: true, data: rows.map((r) => ({
+  const email = req.ctx.raw?.email || req.ctx.email || '';
+  const youAreMaster = await db.isMasterAdmin(req.ctx.tenantId, req.ctx.sub, email);
+  res.json({ ok: true, youAreMaster, data: rows.map((r) => ({
     employeeRef: r.employee_ref,
     email: r.email || r.employee_ref,
     name: r.name || '',
@@ -372,8 +376,26 @@ app.get('/api/members', admin(), async (req, res) => {
     canUpload: r.can_upload !== false,
     hasFolder: !!r.folder_id,
     docCount: Number(r.doc_count || 0),
+    // The env list counts even when the row was never stamped, so the roster
+    // agrees with what enforcement will actually do.
+    master: r.is_master === true
+            || db.isMasterByEnv({ employeeRef: r.employee_ref, email: r.email }),
     you: r.employee_ref === req.ctx.sub,
   })) });
+});
+
+/** Grant or revoke master admin. Only a master admin may do this: an ordinary
+ *  "admin" here is every member while per-app roles are dormant, so allowing
+ *  it at that level would let anyone promote themselves to see everything. */
+app.patch('/api/members/:ref/master', admin(), async (req, res) => {
+  const email = req.ctx.raw?.email || req.ctx.email || '';
+  if (!(await db.isMasterAdmin(req.ctx.tenantId, req.ctx.sub, email))) {
+    return res.status(403).json({ ok: false, error: {
+      code: 'FORBIDDEN', message: 'Only a master admin can change this.' } });
+  }
+  const row = await db.setMasterAdmin(req.ctx.tenantId, req.params.ref, !!req.body?.master);
+  if (!row) return res.status(404).json({ ok: false, error: 'no such member' });
+  res.json({ ok: true, data: row });
 });
 
 app.patch('/api/members/:ref', admin(), async (req, res) => {
@@ -397,8 +419,128 @@ app.get('/api/status', reader(), async (req, res) => {
   res.json({ ok: true, data: { connection: connections[0] || null, connections, providers: listProviders(), counts, pending } });
 });
 
+/** The caller's view of the library.
+ *
+ *  This route used to return every document in the tenant to every reader —
+ *  the same leak search had, on a route nobody thought of as a search. Now it
+ *  returns the caller's own folder plus Shared, and the whole workspace only
+ *  for a master admin.
+ *
+ *  The response carries `you` so the UI does not have to guess what to show:
+ *  a client that has to infer its own permissions gets it wrong, and gets it
+ *  wrong in the direction of showing a button that then 403s. */
 app.get('/api/documents', reader(), async (req, res) => {
-  res.json({ ok: true, data: await db.listDocuments(req.ctx.tenantId, { limit: Number(req.query.limit) || 50 }) });
+  const { tenantId, sub } = req.ctx;
+  const email = req.ctx.raw?.email || req.ctx.email || '';
+  const master = await db.isMasterAdmin(tenantId, sub, email);
+  const scopes = master ? null : await db.readableScopes(tenantId, sub);
+  const [docs, canUpload] = await Promise.all([
+    db.listDocuments(tenantId, { limit: Number(req.query.limit) || 100, scopes }),
+    db.canUpload(tenantId, sub),
+  ]);
+  const mine = db.scopesFor(sub)[1] || '';   // 'member:<ref>', '' if no identity
+  res.json({
+    ok: true,
+    data: docs.map((d) => ({
+      ...d,
+      downloadUrl: gdrive().downloadUrlFor(d.fileId),
+      owned: d.scope === mine,
+      shared: d.scope === 'shared',
+      // Who may act on this row, decided server-side.
+      canEdit: master || d.scope === mine,
+    })),
+    you: {
+      employeeRef: sub, master, canUpload,
+      // Master admins publish regardless of the upload switch: revoking
+      // someone's upload rights should not disarm the person who administers
+      // the workspace.
+      canShare: master || canUpload,
+      scope: mine,
+    },
+  });
+});
+
+/** Resolve a document the caller is allowed to act on, or send the refusal.
+ *  Returns null when it has already answered. */
+async function actionable(req, res) {
+  const { tenantId, sub } = req.ctx;
+  const email = req.ctx.raw?.email || req.ctx.email || '';
+  const master = await db.isMasterAdmin(tenantId, sub, email);
+  const scopes = master ? null : await db.readableScopes(tenantId, sub);
+  const doc = await db.getDocument(tenantId, req.params.id, scopes);
+  if (!doc) {
+    // Identical answer for "no such document" and "not yours": a 403 that
+    // differs from a 404 tells a member exactly which documents exist in
+    // someone else's folder.
+    res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'No such document.' } });
+    return null;
+  }
+  const mine = db.scopesFor(sub)[1] || '';
+  const owned = !!mine && doc.scope === mine;
+  if (!master && !owned) {
+    res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'No such document.' } });
+    return null;
+  }
+  return { doc, master, owned };
+}
+
+/** Publish a file (anyone with the link may view) or revoke it. */
+app.post('/api/documents/:id/share', reader(), async (req, res) => {
+  const found = await actionable(req, res);
+  if (!found) return;
+  const { doc, master } = found;
+  if (!master && !(await db.canUpload(req.ctx.tenantId, req.ctx.sub))) {
+    return res.status(403).json({ ok: false, error: {
+      code: 'SHARE_DISABLED', message: 'An admin has turned off sharing for you.' } });
+  }
+  const wantPublic = req.body?.public === undefined ? true : !!req.body.public;
+  try {
+    const gd = gdrive();
+    if (!wantPublic) {
+      await gd.makePrivate(req.ctx.tenantId, doc.fileId);
+      const row = await db.setDocumentPublic(req.ctx.tenantId, doc.id, { publicUrl: '' });
+      return res.json({ ok: true, data: { ...row, public: false } });
+    }
+    const out = await gd.makePublic(req.ctx.tenantId, doc.fileId);
+    const row = await db.setDocumentPublic(req.ctx.tenantId, doc.id, {
+      publicUrl: out.viewUrl, sharedBy: String(req.ctx.sub || ''),
+    });
+    res.json({ ok: true, data: {
+      ...row, public: true, link: out.viewUrl, downloadUrl: out.downloadUrl } });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+/** Rename — the file in Drive and our mirror of it, in that order, so a
+ *  failure leaves the two agreeing rather than diverging silently. */
+app.patch('/api/documents/:id', reader(), async (req, res) => {
+  const found = await actionable(req, res);
+  if (!found) return;
+  const title = String(req.body?.title || '').trim();
+  if (!title) return res.status(400).json({ ok: false, error: 'title required' });
+  try {
+    await gdrive().renameFile(req.ctx.tenantId, found.doc.fileId, title);
+    res.json({ ok: true, data: await db.renameDocument(req.ctx.tenantId, found.doc.id, title) });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+/** Remove a file: Drive trash (a 30-day undo), then its chunks, then the row.
+ *  Chunks first among our own stores — an orphaned row is a cosmetic bug, an
+ *  orphaned vector still answers questions. */
+app.delete('/api/documents/:id', reader(), async (req, res) => {
+  const found = await actionable(req, res);
+  if (!found) return;
+  try {
+    await gdrive().trashFile(req.ctx.tenantId, found.doc.fileId);
+    await qdrantDelete(req.ctx.tenantId, found.doc.id);
+    await db.deleteDocumentRow(req.ctx.tenantId, found.doc.id);
+    res.json({ ok: true, data: { id: found.doc.id, deleted: true } });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 app.get('/api/search', reader(), async (req, res) => {
@@ -406,8 +548,12 @@ app.get('/api/search', reader(), async (req, res) => {
   if (!q) return res.json({ ok: true, data: [] });
   try {
     const vec = await embedQuery(q);
-    const scopes = await db.readableScopes(req.ctx.tenantId, req.ctx.sub);
-    res.json({ ok: true, data: await search(req.ctx.tenantId, vec, Math.min(Number(req.query.limit) || 8, 20), scopes) });
+    const email = req.ctx.raw?.email || req.ctx.email || '';
+    const master = await db.isMasterAdmin(req.ctx.tenantId, req.ctx.sub, email);
+    const scopes = master ? null : await db.readableScopes(req.ctx.tenantId, req.ctx.sub);
+    const hits = await search(req.ctx.tenantId, vec, Math.min(Number(req.query.limit) || 8, 20), scopes);
+    res.json({ ok: true, data: hits.map((h) => ({
+      ...h, downloadUrl: gdrive().downloadUrlFor(h.fileId) })) });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
@@ -434,15 +580,38 @@ app.post('/api/upload', reader(), upload.single('file'), async (req, res) => {
     // and picks up no scope, which would make it readable by nobody and look
     // like a failed upload.
     const gd = getProvider(providerKey);
-    const folderId = await gd.ensureMemberFolder(req.ctx.tenantId, {
-      employeeRef: req.ctx.sub,
-      email: req.ctx.raw?.email || req.ctx.email || '',
-    });
+    // Where it lands decides who can read it, so the choice is explicit:
+    // "shared" puts it in the workspace folder everyone can see, anything else
+    // is the uploader's own. Default stays private — a file that quietly went
+    // workspace-wide because a field was missing is the wrong failure.
+    const toShared = String(req.body.target || '').toLowerCase() === 'shared';
+    const folderId = toShared
+      ? await gd.ensureSharedFolder(req.ctx.tenantId)
+      : await gd.ensureMemberFolder(req.ctx.tenantId, {
+          employeeRef: req.ctx.sub,
+          email: req.ctx.raw?.email || req.ctx.email || '',
+        });
     const uploaded = await gd.uploadFile(req.ctx.tenantId, {
       name: req.file.originalname, mimeType: req.file.mimetype,
       buffer: req.file.buffer, parentId: folderId,
     });
-    res.json({ ok: true, data: await pipeline.indexUploaded(req.ctx.tenantId, providerKey, uploaded) });
+    const indexed = await pipeline.indexUploaded(req.ctx.tenantId, providerKey, uploaded);
+
+    // Publish on upload, when asked. Same permission as sharing an existing
+    // file, checked the same way.
+    let publicLinks = null;
+    if (String(req.body.public || '') === 'true' && indexed?.id) {
+      const email = req.ctx.raw?.email || req.ctx.email || '';
+      const master = await db.isMasterAdmin(req.ctx.tenantId, req.ctx.sub, email);
+      if (master || await db.canUpload(req.ctx.tenantId, req.ctx.sub)) {
+        const out = await gd.makePublic(req.ctx.tenantId, uploaded.fileId || uploaded.id);
+        await db.setDocumentPublic(req.ctx.tenantId, indexed.id, {
+          publicUrl: out.viewUrl, sharedBy: String(req.ctx.sub || ''),
+        });
+        publicLinks = { link: out.viewUrl, downloadUrl: out.downloadUrl };
+      }
+    }
+    res.json({ ok: true, data: { ...indexed, target: toShared ? 'shared' : 'mine', public: publicLinks } });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
@@ -526,6 +695,9 @@ app.listen(PORT, () => {
   console.log(`eesa-plugin-documents listening on :${PORT}`);
   applySchema()
     .then(() => console.log('schema applied (idempotent)'))
+    // After the schema, never before: the column it writes is created there.
+    .then(() => db.syncMasterAdminsFromEnv())
+    .then((n) => { if (n) console.log(`master admins synced from env (${n} row(s))`); })
     // Loud, but not fatal: a running process that can still serve /manifest and
     // report the failure beats a crash loop with no reachable diagnostics.
     .catch((e) => console.error('schema apply FAILED:', e.message));
