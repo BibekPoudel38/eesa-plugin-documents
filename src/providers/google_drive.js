@@ -148,6 +148,14 @@ export async function ensureSharedFolder(tenantId) {
  *  employeeRef in member_folders, so renaming a mailbox cannot hand someone
  *  else's documents to a new address. */
 export async function ensureMemberFolder(tenantId, { employeeRef, email }) {
+  // Reuse the mapping first. Naming is not a stable key: the downstream token
+  // carries no email, so a call from the upload path would fall back to the
+  // employeeRef, not find the folder named after the address, and create a
+  // SECOND folder for the same person — splitting their documents across two
+  // scopes and silently orphaning whatever was already filed.
+  const known = await db.getMemberFolder(tenantId, employeeRef);
+  if (known?.folder_id) return known.folder_id;
+
   const drive = await driveFor(tenantId);
   const root = await ensureFolder(tenantId);
   if (!drive || !root) return null;
