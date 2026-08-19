@@ -196,6 +196,19 @@ export async function search(tenantId, vector, limit = 6, scopes = null) {
     },
     with_payload: true,
   });
+  // What the filter ACTUALLY was, and what came back under it. Identity was
+  // already proven correct at the /mcp boundary while results still crossed
+  // users, so the remaining question is whether this function received the
+  // scopes at all — and a returned point whose payload scope is not in the
+  // caller's list is the leak itself, printed.
+  try {
+    const got = (res.points || []).map((r) => r.payload?.scope ?? null);
+    const bad = got.filter((sc) => scopes && !scopes.includes(sc));
+    console.log('[qdrant.search] scopesArg=%s points=%d scopesReturned=%s%s',
+      JSON.stringify(scopes), (res.points || []).length, JSON.stringify(got),
+      bad.length ? ' *** OUT-OF-SCOPE=' + JSON.stringify(bad) + ' ***' : '');
+  } catch (e) { /* logging must never break a search */ }
+
   const seen = new Set();
   const out = [];
   for (const r of (res.points || [])) {
