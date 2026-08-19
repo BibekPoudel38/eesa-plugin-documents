@@ -175,7 +175,11 @@ export async function upsertDocument(tenantId, { provider, fileId, title, mime, 
 
 export async function getDocumentByFile(tenantId, provider, fileId) {
   const rows = await q(
-    `select id, title, mime, link, size_bytes, content_hash, state from documents
+    // `folder` is not optional here even though nothing displayed it: the
+    // indexer derives the document's SCOPE from it, so omitting it made every
+    // file resolve to "readable by nobody" while looking perfectly indexed.
+    // An explicit column list is the right call — this is the cost of one.
+    `select id, title, mime, link, size_bytes, content_hash, state, folder, scope from documents
       where tenant_id = $1 and provider = $2 and file_id = $3`,
     [tenantId, provider, fileId],
   );
