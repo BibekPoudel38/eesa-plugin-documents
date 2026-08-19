@@ -105,3 +105,22 @@ create table if not exists member_folders (
     unique (tenant_id, folder_id)
 );
 create index if not exists member_folders_tenant_idx on member_folders (tenant_id);
+
+
+-- One-time links that start the OAuth grant from a plain browser tab.
+--
+-- Connecting a drive is a once-per-workspace act performed out of band, so the
+-- UI carries no connect button. This is the door instead: minted server-side,
+-- opened once, then dead. Single-use and short-lived because the link IS the
+-- authority to attach a Drive to this tenant — anyone holding it can, and a
+-- link that stays valid in someone's history is a standing invitation.
+create table if not exists setup_links (
+    token        text primary key,
+    tenant_id    text not null,
+    employee_ref text not null default 'setup',
+    provider     text not null default 'google_drive',
+    expires_at   timestamptz not null,
+    used_at      timestamptz,
+    created_at   timestamptz not null default now()
+);
+create index if not exists setup_links_tenant_idx on setup_links (tenant_id);

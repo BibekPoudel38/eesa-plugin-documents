@@ -3,6 +3,7 @@
 //   /api/*      REST (token; OAuth callback is open) → connect / upload / search
 //   GET  /app   embedded admin UI (surface="ui")     → connect + upload + status
 import express from 'express';
+import { randomUUID } from 'node:crypto';
 import multer from 'multer';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
@@ -143,6 +144,45 @@ app.get('/api/connect/:provider/start', admin(), (req, res) => {
     return res.status(500).json({ ok: false, error: 'Google OAuth is not configured on the server.' });
   }
   res.json({ ok: true, url: getProvider(providerKey).authUrl(makeState(req.ctx.tenantId, req.ctx.sub, providerKey)) });
+});
+
+// Mint a one-time setup URL. Gateway-only: this is a server-to-server call
+// from the platform (or an operator holding the platform secret), never
+// something a browser reaches. It hands back a link, not a connection.
+app.post('/api/setup-link', (req, res, next) => {
+  try { requireGateway(req); } catch (e) { return res.status(e.status || 403).json({ ok: false, error: e.message }); }
+  next();
+}, async (req, res) => {
+  const tenantId = String(req.body?.tenantId || '').trim();
+  if (!tenantId) return res.status(400).json({ ok: false, error: 'tenantId is required' });
+  const provider = String(req.body?.provider || 'google_drive');
+  if (!isSupported(provider)) return res.status(400).json({ ok: false, error: 'unsupported provider' });
+  const token = randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, '');
+  const row = await db.createSetupLink(tenantId, {
+    token, provider,
+    employeeRef: String(req.body?.employeeRef || 'setup'),
+    ttlMinutes: Math.min(Number(req.body?.ttlMinutes) || 60, 1440),
+  });
+  const base = (process.env.PLUGIN_BASE_URL || '').replace(/\/$/, '');
+  res.json({ ok: true, url: `${base}/setup/${token}`, expiresAt: row.expires_at });
+});
+
+// Open the link in a normal tab. No bearer — the token IS the authority, which
+// is why claiming it is single-use and why it redirects straight out to Google
+// rather than rendering anything that could be re-submitted.
+app.get('/setup/:token', async (req, res) => {
+  const claim = await db.claimSetupLink(String(req.params.token || ''));
+  if (!claim) {
+    return res.status(410).type('html').send(
+      '<h3>This setup link is no longer valid.</h3>'
+      + '<p>Setup links can be opened once and expire. Ask for a fresh one.</p>');
+  }
+  if (claim.provider === 'google_drive' && !process.env.GOOGLE_OAUTH_CLIENT_ID) {
+    return res.status(500).type('html').send('<h3>Google OAuth is not configured on this server.</h3>');
+  }
+  const url = getProvider(claim.provider)
+    .authUrl(makeState(claim.tenant_id, claim.employee_ref, claim.provider));
+  res.redirect(302, url);
 });
 
 // The provider redirects here (top-level, no bearer) — trust the signed state.

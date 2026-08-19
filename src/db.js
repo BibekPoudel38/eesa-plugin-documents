@@ -376,3 +376,29 @@ export async function sharedDocCount(tenantId) {
     [tenantId]);
   return rows[0]?.n || 0;
 }
+
+
+export async function createSetupLink(tenantId, { token, employeeRef = 'setup',
+                                                  provider = 'google_drive', ttlMinutes = 60 }) {
+  const rows = await q(
+    `insert into setup_links (token, tenant_id, employee_ref, provider, expires_at)
+     values ($1, $2, $3, $4, now() + ($5 || ' minutes')::interval)
+     returning token, expires_at`,
+    [token, tenantId, employeeRef, provider, String(ttlMinutes)],
+  );
+  return rows[0];
+}
+
+/** Claim a setup link. Marks it used in the SAME statement that reads it, so
+ *  two clicks on the same URL cannot both proceed — the second gets nothing.
+ *  Returns null for unknown, expired or already-used tokens alike: a caller
+ *  probing tokens learns the same thing either way. */
+export async function claimSetupLink(token) {
+  const rows = await q(
+    `update setup_links set used_at = now()
+      where token = $1 and used_at is null and expires_at > now()
+      returning tenant_id, employee_ref, provider`,
+    [token],
+  );
+  return rows[0] || null;
+}
