@@ -108,7 +108,10 @@ export async function indexUploaded(tenantId, providerKey, file) {
   const { id } = await db.upsertDocument(tenantId, {
     provider: providerKey, fileId: file.id, title: file.name, mime: file.mimeType,
     link: file.link || '', sizeBytes: file.size ?? null, contentHash: file.hash ?? null,
-    folder: 'Eesa Documents',
+    // The folder ID, not its name. scopeForFolder() matches on the Drive folder
+    // id; a human-readable name here matched nothing, so every uploaded file
+    // came out unscoped.
+    folder: file.folderId || '',
   });
   await db.enqueue(tenantId, providerKey, file.id);
   drainQueue().catch(() => {});

@@ -210,7 +210,11 @@ export async function uploadFile(tenantId, { name, mimeType, buffer, parentId = 
   const res = await drive.files.create({
     requestBody: { name, parents: folderId ? [folderId] : undefined },
     media: { mimeType: mimeType || 'application/octet-stream', body: Readable.from(buffer) },
-    fields: 'id,name,mimeType,webViewLink,size,md5Checksum',
+    // `parents` matters: normalize() turns it into folderId, which is what the
+    // pipeline derives the document's SCOPE from. Without it an uploaded file
+    // is indexed with an empty scope and is therefore readable by nobody —
+    // a successful upload that silently answers for no one.
+    fields: 'id,name,mimeType,webViewLink,size,md5Checksum,parents',
   });
   return normalize(res.data);
 }
