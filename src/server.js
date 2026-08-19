@@ -109,6 +109,7 @@ function requireRole(min) {
       return res.status(e.status || 401).json({ ok: false, error: e.message });
     }
     req.role = await effectiveRole(req.ctx);
+    ensureFolderForCaller(req.ctx, req.role);   // not awaited: see the comment
     if (RANK[req.role] < RANK[min]) {
       return res.status(403).json({
         ok: false,
@@ -178,6 +179,55 @@ app.get('/api/connect/:provider/callback', async (req, res) => {
 });
 
 // ---- status / documents / search / upload / sync --------------------------
+// A member's folder is created the moment they are allowed in — not by an
+// admin remembering to make one. effectiveRole() has just decided this caller
+// may read documents, so this is the first instant we know the folder is owed.
+//
+// Fire-and-forget on purpose: a Drive hiccup must not fail the request that
+// triggered it. The folder is idempotent, so the next request retries it.
+async function ensureFolderForCaller(ctx, role) {
+  if (role !== 'admin' && role !== 'staff') return;
+  if (!ctx?.sub) return;
+  try {
+    const conn = await db.getConnection(ctx.tenantId, 'google_drive');
+    if (!conn) return;                       // nothing to create it in yet
+    const existing = await db.getMemberFolder(ctx.tenantId, ctx.sub);
+    if (existing) return;
+    const gd = getProvider('google_drive');
+    await gd.ensureSharedFolder(ctx.tenantId);
+    await gd.ensureMemberFolder(ctx.tenantId, {
+      employeeRef: ctx.sub,
+      email: ctx.raw?.email || ctx.email || '',
+    });
+  } catch (e) {
+    console.warn('ensureFolderForCaller:', e.message);
+  }
+}
+
+// The folder directory. An admin sees every member's folder — who has one, how
+// many documents are in it — and never the documents themselves; the scope
+// filter in search still applies to an admin like anyone else.
+app.get('/api/folders', reader(), async (req, res) => {
+  const isAdmin = req.role === 'admin';
+  const shared = { name: 'Shared', scope: 'shared', everyone: true,
+                   docCount: await db.sharedDocCount(req.ctx.tenantId) };
+  if (!isAdmin) {
+    const mine = await db.getMemberFolder(req.ctx.tenantId, req.ctx.sub);
+    return res.json({ ok: true, data: { shared, folders: mine ? [{
+      email: mine.email, employeeRef: mine.employee_ref, mine: true,
+    }] : [] } });
+  }
+  const rows = await db.listMemberFolders(req.ctx.tenantId);
+  res.json({ ok: true, data: { shared, folders: rows.map((r) => ({
+    email: r.email || r.employee_ref,
+    name: r.name || '',
+    role: r.role || '',
+    employeeRef: r.employee_ref,
+    docCount: Number(r.doc_count || 0),
+    mine: r.employee_ref === req.ctx.sub,
+  })) } });
+});
+
 app.get('/api/status', reader(), async (req, res) => {
   const [connections, counts, pending] = await Promise.all([
     db.listConnections(req.ctx.tenantId),

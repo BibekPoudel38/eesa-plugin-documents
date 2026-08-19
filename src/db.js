@@ -349,3 +349,30 @@ export async function getSharedFolderId(tenantId) {
 export async function setSharedFolderId(tenantId, folderId) {
   return upsertMemberFolder(tenantId, { employeeRef: SHARED_REF, email: '', folderId });
 }
+
+
+/** Every member folder in the workspace, newest first, with the member's name
+ *  when we know it. Admin-only view: this is a directory of who has a folder,
+ *  never their contents. */
+export async function listMemberFolders(tenantId) {
+  return q(
+    `select f.employee_ref, f.email, f.folder_id, f.created_at,
+            m.name, m.role,
+            (select count(*) from documents d
+              where d.tenant_id = f.tenant_id
+                and d.scope = 'member:' || f.employee_ref) as doc_count
+       from member_folders f
+       left join members m
+         on m.tenant_id = f.tenant_id and m.employee_ref = f.employee_ref
+      where f.tenant_id = $1 and f.employee_ref <> $2
+      order by f.created_at desc`,
+    [tenantId, SHARED_REF],
+  );
+}
+
+export async function sharedDocCount(tenantId) {
+  const rows = await q(
+    `select count(*)::int as n from documents where tenant_id = $1 and scope = 'shared'`,
+    [tenantId]);
+  return rows[0]?.n || 0;
+}

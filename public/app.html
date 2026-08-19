@@ -23,6 +23,10 @@
   input[type=search]{ width:100%; padding:11px 13px; border-radius:9px; border:1px solid var(--line); background:#0e1425; color:var(--fg); font-size:14px; }
   .hit { border-top:1px solid var(--line); padding:11px 0; } .hit a { color:var(--acc); text-decoration:none; font-weight:600; } .hit p{ color:var(--mut); font-size:13px; margin:4px 0 0; line-height:1.45; }
   .muted{ color:var(--mut); font-size:13px; }
+  .frow{display:flex;align-items:center;justify-content:space-between;
+        gap:12px;padding:9px 0;border-bottom:1px solid var(--line)}
+  .frow:last-child{border-bottom:0}
+  .sub{color:var(--muted);font-size:12px;margin-top:2px}
 </style>
 </head>
 <body>
@@ -33,11 +37,7 @@
   <div class="card" id="connCard">
     <div class="row">
       <div><b id="connTitle">Google Drive</b><div class="muted" id="connSub">Checking…</div></div>
-      <div class="row" style="gap:8px">
-        <span class="pill" id="connPill">…</span>
-        <button id="connectBtn" style="display:none">Connect Google Drive</button>
-        <button id="syncBtn" class="ghost" style="display:none">Re-sync</button>
-      </div>
+      <span class="pill" id="connPill">…</span>
     </div>
     <div class="stats" id="stats" style="display:none">
       <div class="stat"><b id="cTotal">0</b><span>files</span></div>
@@ -45,6 +45,13 @@
       <div class="stat"><b id="cPending">0</b><span>in queue</span></div>
       <div class="stat"><b id="cError">0</b><span>errors</span></div>
     </div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <div><b>Folders</b><div class="muted" id="foldersSub">Shared is searchable by everyone. A member's folder answers only for them.</div></div>
+    </div>
+    <div id="folders" style="margin-top:10px"></div>
   </div>
 
   <div class="card">
@@ -116,9 +123,8 @@ async function refresh() {
     const connected = connection && connection.status !== 'disconnected';
     $('connPill').className = 'pill ' + (connection?.status === 'error' ? 'err' : connection?.status === 'syncing' ? 'warn' : connected ? 'ok' : '');
     $('connPill').textContent = connection ? connection.status : 'not connected';
+    renderFolders();
     $('connSub').textContent = connected ? (connection.accountEmail || 'connected') : 'Not connected yet';
-    $('connectBtn').style.display = connected ? 'none' : '';
-    $('syncBtn').style.display = connected ? '' : 'none';
     $('stats').style.display = connected ? 'grid' : 'none';
     $('cTotal').textContent = counts.total; $('cIndexed').textContent = counts.indexed;
     $('cPending').textContent = pending; $('cError').textContent = counts.error;
@@ -138,36 +144,42 @@ function showError(msg) {
   el.style.color = '#f87171';
 }
 
-$('connectBtn').onclick = async () => {
-  $('connectBtn').disabled = true;
-  showError('Starting Google sign-in…');
+// No connect/sync controls here by design. The workspace's Drive is connected
+// ONCE, out of band, by whoever administers the tenant — a person opening this
+// page is here to see documents, not to perform setup, and a connect button in
+// everyone's view is an invitation to a second connection this plugin does not
+// support (connections are unique per tenant+provider).
+
+// The folder directory. An admin sees every member's folder; a member sees
+// their own. Either way this lists FOLDERS, never their contents — who has a
+// folder is directory information, what is inside it is not.
+async function renderFolders() {
+  const host = $('folders');
+  if (!host) return;
   try {
-    const { url } = await api('/connect/google/start');
-    if (!url) throw new Error('the server returned no authorization URL');
-    const w = window.open(url, '_blank', 'noopener');
-    // allow-popups is set, but a blocked popup still returns null and the user
-    // is owed a way through rather than a silent no-op.
-    if (!w) {
-      showError('Your browser blocked the sign-in window. Open this link: ' + url);
-      const a = document.createElement('a');
-      a.href = url; a.target = '_blank'; a.rel = 'noopener';
-      a.textContent = 'Continue to Google';
-      a.style.cssText = 'display:block;margin-top:6px;color:#93c5fd';
-      $('connSub').after(a);
-    } else {
-      showError('Finish in the Google window, then press Re-sync.');
+    const { shared, folders } = await api('/folders');
+    const rows = [];
+    rows.push(row('Shared', 'everyone in this workspace', shared.docCount, true));
+    for (const f of folders) {
+      rows.push(row(f.email + (f.mine ? ' (you)' : ''),
+                    f.name || f.role || 'member', f.docCount ?? null, false));
     }
+    host.innerHTML = rows.join('');
   } catch (e) {
-    showError('Connect failed: ' + e.message);
+    host.innerHTML = '<div class="sub">Folders unavailable: ' + esc(e.message) + '</div>';
   }
-  $('connectBtn').disabled = false;
-};
-$('syncBtn').onclick = async () => {
-  $('syncBtn').disabled = true;
-  try { await api('/sync', { method: 'POST' }); }
-  catch (e) { showError(e.message); }
-  $('syncBtn').disabled = false; refresh();
-};
+}
+function esc(t) {
+  return String(t).replace(/[&<>"]/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+function row(title, sub, count, isShared) {
+  return '<div class="frow">'
+    + '<div><b>' + esc(title) + '</b><div class="sub">' + esc(sub) + '</div></div>'
+    + '<span class="pill' + (isShared ? ' ok' : '') + '">'
+    + (count === null ? 'folder' : count + ' file' + (count === 1 ? '' : 's'))
+    + '</span></div>';
+}
 
 // Upload: raw fetch (FormData sets its own multipart Content-Type — don't force JSON).
 $('file').onchange = async (e) => {
