@@ -318,6 +318,31 @@ app.post('/api/upload', admin(), upload.single('file'), async (req, res) => {
   }
 });
 
+// Trigger a sync without a user. The connect callback already kicks one off,
+// but that is a single shot at the worst possible moment: if anything is
+// misconfigured when the drive is attached — Qdrant unreachable, embeddings
+// cold — the only sync that was ever going to run has already failed, and with
+// no Re-sync button in the UI there is nothing left to retry it.
+//
+// Gateway-only, so this is the platform (or an operator holding its secret)
+// asking, never a browser.
+app.post('/api/sync-now', (req, res, next) => {
+  try { requireGateway(req); } catch (e) { return res.status(e.status || 403).json({ ok: false, error: e.message }); }
+  next();
+}, async (req, res) => {
+  const tenantId = String(req.body?.tenantId || '').trim();
+  if (!tenantId) return res.status(400).json({ ok: false, error: 'tenantId is required' });
+  try {
+    const conns = await db.listConnections(tenantId);
+    if (!conns.length) return res.json({ ok: true, data: { queued: 0, note: 'no drive connected' } });
+    let queued = 0;
+    for (const c of conns) { const r = await pipeline.syncTenant(tenantId, c.provider); queued += r.queued; }
+    res.json({ ok: true, data: { queued, providers: conns.map((c) => c.provider) } });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 app.post('/api/sync', admin(), async (req, res) => {
   try {
     const conns = await db.listConnections(req.ctx.tenantId);
