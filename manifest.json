@@ -14,11 +14,7 @@
     "verify": "eesa-jwks",
     "gatewayOnly": true
   },
-  "scopes": [
-    "documents:read",
-    "documents:write",
-    "documents:admin"
-  ],
+  "scopes": ["documents:read", "documents:write", "documents:admin"],
   "surfaces": {
     "mcp": {
       "endpoint": "https://documents.plugins.bibekpoudel.com/mcp",
