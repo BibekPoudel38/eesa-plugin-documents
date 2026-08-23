@@ -150,6 +150,9 @@ const docOut = (d) =>
     // looking perfectly healthy everywhere else — without this the only way to
     // notice was to read Qdrant payloads by hand.
     scope: d.scope || '',
+    // Shown in the file list. Drive gives no size for its own native docs
+    // (Sheets/Docs), so null means "not applicable" rather than "zero bytes".
+    sizeBytes: d.size_bytes == null ? null : Number(d.size_bytes),
     publicUrl: d.public_url || '',
     sharedBy: d.shared_by || '',
     state: d.state,

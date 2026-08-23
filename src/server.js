@@ -16,7 +16,7 @@ import { getProvider, listProviders, isSupported } from './providers/index.js';
 import { handleRpc } from './mcp.js';
 // esc/page/state live in web.js so they can be unit tested: this module calls
 // app.listen() at import, so nothing defined here is reachable from a test.
-import { esc, page, makeState, readState } from './web.js';
+import { esc, page, makeState, readState, requestedScope } from './web.js';
 import { embedQuery, warm } from './embed.js';
 import { search, ping as qdrantPing, deleteDocument as qdrantDelete } from './qdrant.js';
 
@@ -451,12 +451,26 @@ app.get('/api/documents', reader(), async (req, res) => {
   const { tenantId, sub } = req.ctx;
   const email = req.ctx.raw?.email || req.ctx.email || '';
   const master = await db.isMasterAdmin(tenantId, sub, email);
-  const scopes = master ? null : await db.readableScopes(tenantId, sub);
+  const mineScope = db.scopesFor(sub)[1] || '';
+  const want = requestedScope(req.query.scope, { master, mine: mineScope });
+  if (want === null) {
+    // Same answer as a folder that does not exist — see actionable().
+    return res.status(404).json({
+      ok: false, error: { code: 'NOT_FOUND', message: 'No such folder.' },
+    });
+  }
+  // undefined -> the caller's own readable set (or everything, for a master).
+  const scopes = want !== undefined
+    ? [want]
+    : (master ? null : await db.readableScopes(tenantId, sub));
+  // A member whose read was revoked has an EMPTY readable set, and asking for
+  // their own folder by name must not sneak past that.
+  const revoked = !master && !(await db.readableScopes(tenantId, sub)).length;
   const [docs, canUpload] = await Promise.all([
-    db.listDocuments(tenantId, { limit: Number(req.query.limit) || 100, scopes }),
+    revoked ? [] : db.listDocuments(tenantId, { limit: Number(req.query.limit) || 100, scopes }),
     db.canUpload(tenantId, sub),
   ]);
-  const mine = db.scopesFor(sub)[1] || '';   // 'member:<ref>', '' if no identity
+  const mine = mineScope;   // 'member:<ref>', '' if no identity
   res.json({
     ok: true,
     data: docs.map((d) => ({
@@ -468,7 +482,10 @@ app.get('/api/documents', reader(), async (req, res) => {
       canEdit: master || d.scope === mine,
     })),
     you: {
-      employeeRef: sub, master, canUpload,
+      employeeRef: sub, master, canUpload, email,
+      // Which folder these rows came from, so the UI can keep its sidebar
+      // selection and the server's answer from disagreeing.
+      viewing: want !== undefined ? want : (master ? 'all' : 'own'),
       // Master admins publish regardless of the upload switch: revoking
       // someone's upload rights should not disarm the person who administers
       // the workspace.

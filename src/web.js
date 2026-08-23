@@ -48,3 +48,29 @@ export function page(title, bodyHtml) {
   <div style="max-width:420px;text-align:center;padding:24px"><h2 style="margin:0 0 8px">${esc(title)}</h2>
   <p style="opacity:.8;line-height:1.5">${bodyHtml}</p></div>`;
 }
+
+
+/** Which single folder a caller asked to browse, from `?scope=`.
+ *
+ *  Returns `undefined` for "no filter — use the caller's own readable set",
+ *  a scope string to narrow to one folder, or `null` for REFUSED.
+ *
+ *  A master admin may open anybody's folder — that is what master means. A
+ *  member may name only their own folder or Shared. Anything else is refused
+ *  outright rather than quietly falling back to their own set: silently
+ *  widening a request somebody was not allowed to make is how a UI ends up
+ *  showing the wrong person's files and nobody notices.
+ *
+ *  Lives here rather than in server.js for the same reason `esc` and
+ *  `readState` do — server.js calls app.listen() at import time, so anything
+ *  defined there cannot be unit tested without starting a real server. This is
+ *  a permission boundary; it has to be testable.
+ */
+export function requestedScope(raw, { master = false, mine = '' } = {}) {
+  const want = String(raw || '').trim();
+  if (!want) return undefined;
+  if (master) return want;
+  if (want === 'shared') return want;
+  if (mine && want === mine) return want;
+  return null;
+}

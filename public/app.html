@@ -5,195 +5,267 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Eesa Documents</title>
 <style>
+  /* ---------------------------------------------------------------------
+     THEME
+     The Eesa shell hands us its theme over the postMessage bridge and we
+     stamp it on <html data-theme>. The previous build did that too — but
+     every colour was a hardcoded dark value, so a workspace on the light
+     theme got a dark rectangle embedded in a light app. Both themes are
+     real now, and prefers-color-scheme covers the page opened directly.
+     --------------------------------------------------------------------- */
   :root{
-    color-scheme: light dark;
-    --bg:#0b1020; --card:#141a2c; --line:#242e46; --fg:#e8ebf2; --mut:#94a0bd;
-    --acc:#4f7cff; --ok:#2fbf71; --warn:#e2b93b; --err:#f87171; --chip:#1b2338;
+    color-scheme: light;
+    --bg:#ffffff; --panel:#f6f8fc; --card:#ffffff; --line:#dde3ee;
+    --fg:#131822; --mut:#5c6880; --soft:#eef2f9;
+    --acc:#2f6bff; --acc-soft:#e6eeff; --acc-fg:#ffffff;
+    --ok:#0f9d58; --warn:#b8860b; --err:#d93025;
+    --shadow:0 1px 2px rgba(16,24,40,.06), 0 1px 3px rgba(16,24,40,.10);
+    --shadow-lg:0 8px 24px rgba(16,24,40,.14);
   }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      color-scheme: dark;
+      --bg:#0b1020; --panel:#111830; --card:#141c30; --line:#26314c;
+      --fg:#e8ebf2; --mut:#93a0bd; --soft:#1a2338;
+      --acc:#5b86ff; --acc-soft:#1b2748; --acc-fg:#ffffff;
+      --ok:#3ecf8e; --warn:#e2b93b; --err:#f87171;
+      --shadow:0 1px 2px rgba(0,0,0,.4); --shadow-lg:0 10px 30px rgba(0,0,0,.5);
+    }
+  }
+  :root[data-theme="dark"]{
+    color-scheme: dark;
+    --bg:#0b1020; --panel:#111830; --card:#141c30; --line:#26314c;
+    --fg:#e8ebf2; --mut:#93a0bd; --soft:#1a2338;
+    --acc:#5b86ff; --acc-soft:#1b2748; --acc-fg:#ffffff;
+    --ok:#3ecf8e; --warn:#e2b93b; --err:#f87171;
+    --shadow:0 1px 2px rgba(0,0,0,.4); --shadow-lg:0 10px 30px rgba(0,0,0,.5);
+  }
+
   *{box-sizing:border-box}
-  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
-       background:var(--bg);color:var(--fg);-webkit-font-smoothing:antialiased}
-  .wrap{max-width:820px;margin:0 auto;padding:20px 18px 48px}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+       -webkit-font-smoothing:antialiased;font-size:14px}
 
-  header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:16px}
-  h1{font-size:19px;margin:0 0 3px;letter-spacing:-.01em}
-  .sub{color:var(--mut);font-size:13px;line-height:1.45}
+  .app{display:grid;grid-template-columns:236px 1fr;height:100dvh}
 
-  .tabs{display:flex;gap:4px;background:var(--chip);padding:4px;border-radius:11px;margin-bottom:16px}
-  .tab{flex:1;text-align:center;padding:9px 10px;border-radius:8px;font-size:13.5px;
-       font-weight:600;color:var(--mut);cursor:pointer;border:0;background:transparent}
-  .tab[aria-selected="true"]{background:var(--card);color:var(--fg);box-shadow:0 1px 2px rgba(0,0,0,.3)}
+  /* ---- sidebar ---- */
+  .side{background:var(--panel);border-right:1px solid var(--line);
+        display:flex;flex-direction:column;min-height:0;overflow-y:auto}
+  .brand{display:flex;align-items:center;gap:9px;padding:16px 16px 12px}
+  .brand h1{font-size:15px;margin:0;font-weight:650;letter-spacing:-.01em}
+  .brand .dot{width:9px;height:9px;border-radius:99px;background:var(--mut);flex:none}
+  .brand .dot.ok{background:var(--ok)} .brand .dot.err{background:var(--err)}
+  .brand .dot.warn{background:var(--warn)}
 
-  .card{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:15px;margin-bottom:13px}
-  .row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .navsec{padding:6px 8px 2px;color:var(--mut);font-size:11px;font-weight:700;
+          letter-spacing:.06em;text-transform:uppercase;margin-top:8px}
+  .navitem{display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+           padding:9px 12px;margin:1px 8px;border-radius:8px;border:0;cursor:pointer;
+           background:transparent;color:var(--fg);font-size:13.5px;font-weight:500;
+           width:calc(100% - 16px)}
+  .navitem:hover{background:var(--soft)}
+  .navitem[aria-current="true"]{background:var(--acc-soft);color:var(--acc);font-weight:650}
+  .navitem .ic{flex:none;display:grid;place-items:center;width:18px}
+  .navitem .lbl{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .navitem .n{color:var(--mut);font-size:11.5px;font-variant-numeric:tabular-nums}
+  .navitem[aria-current="true"] .n{color:var(--acc)}
 
-  button{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:9px 14px;
-         font-size:13.5px;font-weight:600;cursor:pointer}
-  button.ghost{background:transparent;border:1px solid var(--line);color:var(--fg);font-weight:500}
-  button.ghost:hover{border-color:var(--acc)}
-  button:disabled{opacity:.45;cursor:default}
+  .sidefoot{margin-top:auto;padding:12px 16px 16px;color:var(--mut);
+            font-size:11.5px;line-height:1.5;border-top:1px solid var(--line)}
 
-  .pill{font-size:11.5px;padding:3px 9px;border-radius:99px;border:1px solid var(--line);color:var(--mut);white-space:nowrap}
-  .pill.ok{color:var(--ok);border-color:#245c40}
-  .pill.err{color:var(--err);border-color:#6b2b2b}
-  .pill.warn{color:var(--warn);border-color:#5e4d1c}
-  .pill.pub{color:#8fd6ad;border-color:#2f7d55}
+  /* ---- main ---- */
+  .main{display:flex;flex-direction:column;min-width:0;min-height:0;position:relative}
+  .topbar{display:flex;align-items:center;gap:9px;padding:12px 16px;
+          border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .crumbs{font-size:16px;font-weight:650;letter-spacing:-.01em;
+          overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:42%}
+  .crumbs .sub{display:block;font-size:11.5px;font-weight:400;color:var(--mut);margin-top:1px}
+  .spacer{flex:1}
 
-  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px}
-  .stat{text-align:center}.stat b{font-size:19px;display:block}.stat span{color:var(--mut);font-size:11.5px}
+  input[type=search],input[type=text]{padding:8px 11px;border-radius:8px;
+    border:1px solid var(--line);background:var(--card);color:var(--fg);font-size:13.5px}
+  input[type=search]{width:210px}
+  input:focus{outline:0;border-color:var(--acc);box-shadow:0 0 0 3px var(--acc-soft)}
+  select{padding:8px 9px;border-radius:8px;border:1px solid var(--line);
+         background:var(--card);color:var(--fg);font-size:13px}
 
-  input[type=search],input[type=text]{width:100%;padding:11px 13px;border-radius:9px;
-    border:1px solid var(--line);background:#0e1425;color:var(--fg);font-size:14px}
-  input:focus{outline:0;border-color:var(--acc)}
+  .btn{border:1px solid var(--line);background:var(--card);color:var(--fg);
+       border-radius:8px;padding:8px 13px;font-size:13.5px;font-weight:600;
+       cursor:pointer;display:inline-flex;align-items:center;gap:7px}
+  .btn:hover{border-color:var(--acc)}
+  .btn.primary{background:var(--acc);border-color:var(--acc);color:var(--acc-fg)}
+  .btn.primary:hover{filter:brightness(1.07)}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .btn.icon{padding:8px 9px}
+  .menu{display:none}
 
-  .frow{display:flex;align-items:center;justify-content:space-between;gap:12px;
-        padding:11px 0;border-bottom:1px solid var(--line)}
-  .frow:last-child{border-bottom:0}
-  .fmain{min-width:0;flex:1}
-  .fmain b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
-  .meta{color:var(--mut);font-size:12px;margin-top:3px;display:flex;gap:7px;align-items:center;flex-wrap:wrap}
-  .fctl{display:flex;align-items:center;gap:7px;flex-shrink:0}
-  .fctl a{color:var(--mut);font-size:12.5px;text-decoration:none;padding:5px 8px;
-          border:1px solid var(--line);border-radius:7px}
-  .fctl a:hover{color:var(--fg);border-color:var(--acc)}
+  .body{flex:1;min-height:0;overflow-y:auto;padding:14px 16px 40px}
 
-  .tg{display:inline-flex;align-items:center;gap:5px;padding:4px 9px;border-radius:999px;
-      border:1px solid var(--line);font-size:12px;cursor:pointer;user-select:none;color:var(--mut)}
-  .tg.on{border-color:#2f7d55;color:#8fd6ad}
-  .tg input{margin:0;accent-color:#2f7d55}
+  /* ---- file list ---- */
+  .lhead{display:grid;grid-template-columns:1fr 130px 110px 1fr;gap:12px;
+         padding:0 10px 8px;color:var(--mut);font-size:11.5px;font-weight:650;
+         letter-spacing:.04em;text-transform:uppercase;border-bottom:1px solid var(--line)}
+  .lhead .r{text-align:right}
+  .row{display:grid;grid-template-columns:1fr 130px 110px 1fr;gap:12px;align-items:center;
+       padding:9px 10px;border-radius:9px;border-bottom:1px solid var(--line)}
+  .row:hover{background:var(--soft)}
+  .name{display:flex;align-items:center;gap:11px;min-width:0}
+  .name b{font-weight:550;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .where,.when{color:var(--mut);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .acts{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
+  .acts a,.acts button{color:var(--mut);font-size:12.5px;text-decoration:none;
+    padding:5px 9px;border:1px solid var(--line);border-radius:7px;background:var(--card);
+    cursor:pointer;font-weight:500}
+  .acts a:hover,.acts button:hover{color:var(--fg);border-color:var(--acc)}
+  .acts button.danger:hover{color:var(--err);border-color:var(--err)}
 
-  .hit{border-top:1px solid var(--line);padding:12px 0}
-  .hit:first-child{border-top:0}
-  .hit a{color:var(--acc);text-decoration:none;font-weight:600;font-size:14px}
-  .hit p{color:var(--mut);font-size:12.5px;margin:5px 0 0;line-height:1.5}
+  /* ---- grid ---- */
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(178px,1fr));gap:12px}
+  .tile{border:1px solid var(--line);border-radius:11px;background:var(--card);
+        padding:13px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:9px}
+  .tile:hover{box-shadow:var(--shadow-lg)}
+  .tile .top{display:flex;align-items:flex-start;gap:9px;min-width:0}
+  .tile b{font-size:13.5px;font-weight:600;line-height:1.35;overflow:hidden;
+          display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  .tile .meta{color:var(--mut);font-size:11.5px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  .tile .acts{justify-content:flex-start;margin-top:auto}
 
-  .muted{color:var(--mut);font-size:13px}
-  .empty{color:var(--mut);font-size:13px;text-align:center;padding:26px 10px;line-height:1.55}
-  .note{font-size:12.5px;margin-top:9px;min-height:16px}
+  .ficon{width:30px;height:30px;border-radius:7px;display:grid;place-items:center;
+         flex:none;font-size:11px;font-weight:750;color:#fff;letter-spacing:-.02em}
+
+  .pill{font-size:11px;padding:2px 8px;border-radius:99px;border:1px solid var(--line);
+        color:var(--mut);white-space:nowrap}
+  .pill.ok{color:var(--ok);border-color:var(--ok)}
+  .pill.err{color:var(--err);border-color:var(--err)}
+  .pill.warn{color:var(--warn);border-color:var(--warn)}
+  .pill.pub{color:var(--acc);border-color:var(--acc);background:var(--acc-soft)}
+
+  .empty{color:var(--mut);text-align:center;padding:56px 20px;line-height:1.6}
+  .empty b{display:block;color:var(--fg);font-size:15px;margin-bottom:5px}
+  .note{font-size:12.5px;padding:0 16px;min-height:0}
+  .note:not(:empty){padding:9px 16px}
   .note.err{color:var(--err)} .note.ok{color:var(--ok)}
-  .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
-  .seg button{background:transparent;color:var(--mut);border-radius:0;padding:7px 12px;font-weight:500;font-size:12.5px}
-  .seg button[aria-pressed="true"]{background:var(--acc);color:#fff}
-  .hide{display:none}
 
-  /* The iOS app renders this in a WebView at phone width, where a row of pills
-     beside a filename has nowhere to go. Stack instead of overflowing. */
-  @media (max-width:600px){
-    body{font-size:15px}
-    .wrap{padding:16px 14px 40px}
-    .frow{flex-direction:column;align-items:flex-start;gap:9px}
-    .fctl{width:100%;flex-wrap:wrap}
-    .row{flex-direction:column;align-items:flex-start;gap:10px}
-    .stats{grid-template-columns:repeat(2,1fr)}
-    .tg{padding:7px 12px;font-size:13px}          /* finger-sized, not mouse-sized */
-    input[type=search],input[type=text]{font-size:16px}  /* <16px makes iOS zoom on focus */
+  /* ---- search hits ---- */
+  .hit{padding:13px 10px;border-bottom:1px solid var(--line)}
+  .hit a{color:var(--acc);text-decoration:none;font-weight:600;font-size:14px}
+  .hit p{color:var(--mut);font-size:12.5px;margin:5px 0 0;line-height:1.55}
+
+  /* ---- people ---- */
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;
+        padding:15px;margin-bottom:13px;box-shadow:var(--shadow)}
+  .card h3{margin:0 0 3px;font-size:14px}
+  .card .muted{color:var(--mut);font-size:12.5px;line-height:1.5}
+  .prow{display:flex;align-items:center;justify-content:space-between;gap:12px;
+        padding:12px 0;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .prow:last-child{border-bottom:0}
+  .tg{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;
+      border:1px solid var(--line);font-size:12px;cursor:pointer;user-select:none;color:var(--mut)}
+  .tg.on{border-color:var(--ok);color:var(--ok)}
+  .tg input{margin:0;accent-color:var(--ok)}
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px}
+  .stat{text-align:center}.stat b{font-size:19px;display:block}
+  .stat span{color:var(--mut);font-size:11.5px}
+
+  /* ---- drag & drop ---- */
+  .drop{position:absolute;inset:0;background:var(--acc-soft);border:2px dashed var(--acc);
+        border-radius:12px;margin:10px;display:grid;place-items:center;z-index:20;
+        color:var(--acc);font-weight:650;font-size:15px;pointer-events:none}
+
+  .hide{display:none !important}
+
+  /* ---- phone (this also renders in the iOS app's WebView) ---- */
+  @media (max-width:860px){
+    .app{grid-template-columns:1fr}
+    .side{position:fixed;inset:0 auto 0 0;width:250px;z-index:30;
+          transform:translateX(-100%);transition:transform .18s ease;box-shadow:var(--shadow-lg)}
+    .side.open{transform:none}
+    .menu{display:inline-flex}
+    .crumbs{max-width:none}
+    input[type=search]{width:100%;order:5;font-size:16px}  /* <16px makes iOS zoom on focus */
+    .lhead{display:none}
+    .row{grid-template-columns:1fr;gap:7px;padding:12px 8px}
+    .row .when{display:none}
+    .acts{justify-content:flex-start}
+    .grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+    .scrim{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:29}
   }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <div>
+<div class="app">
+  <aside class="side" id="side">
+    <div class="brand">
+      <span class="dot" id="dot"></span>
       <h1>Documents</h1>
-      <div class="sub" id="lede">Your files stay in your Drive. Ask about them in chat.</div>
     </div>
-    <span class="pill" id="connPill">…</span>
-  </header>
+    <nav id="nav"></nav>
+    <div class="sidefoot" id="sidefoot">Checking…</div>
+  </aside>
 
-  <div class="tabs" role="tablist">
-    <button class="tab" role="tab" id="tab-files"  aria-selected="true"  onclick="showTab('files')">Files</button>
-    <button class="tab" role="tab" id="tab-search" aria-selected="false" onclick="showTab('search')">Search</button>
-    <button class="tab hide" role="tab" id="tab-people" aria-selected="false" onclick="showTab('people')">People</button>
-  </div>
+  <main class="main">
+    <div class="topbar">
+      <button class="btn icon menu" onclick="toggleSide()" aria-label="Menu">☰</button>
+      <div class="crumbs" id="crumbs">Documents<span class="sub" id="crumbSub"></span></div>
+      <div class="spacer"></div>
+      <input type="search" id="q" placeholder="Search by meaning…" />
+      <select id="sort" onchange="setSort(this.value)" aria-label="Sort">
+        <option value="recent">Last modified</option>
+        <option value="name">Name</option>
+        <option value="size">Size</option>
+      </select>
+      <button class="btn icon" id="viewBtn" onclick="toggleLayout()" aria-label="Toggle view"></button>
+      <label class="btn primary" id="upBtn">Upload<input id="file" type="file" multiple hidden /></label>
+    </div>
+    <div class="note" id="upStatus"></div>
 
-  <!-- FILES -->
-  <section id="pane-files">
-    <div class="card">
-      <div class="row">
-        <div>
-          <b>Add a file</b>
-          <div class="muted" id="upWhere">Uploads into your own folder — only you and admins can read it.</div>
+    <div class="body" id="body">
+      <section id="view-files">
+        <div id="files"><div class="empty">Loading…</div></div>
+      </section>
+      <section id="view-search" class="hide"><div id="results"></div></section>
+      <section id="view-people" class="hide">
+        <div class="card">
+          <h3>Folders &amp; permissions</h3>
+          <div class="muted" id="peopleSub">Each person's folder answers only for them. Shared answers for everyone.</div>
+          <div id="folders" style="margin-top:12px"></div>
         </div>
-        <label class="ghost" style="cursor:pointer;padding:9px 14px;border:1px solid var(--line);border-radius:8px">
-          Choose file<input id="file" type="file" multiple style="display:none" />
-        </label>
-      </div>
-      <div class="row" style="margin-top:11px">
-        <div class="seg">
-          <button id="tgtMine"   aria-pressed="true"  onclick="setTarget('mine')">My folder</button>
-          <button id="tgtShared" aria-pressed="false" onclick="setTarget('shared')">Shared</button>
+        <div class="card">
+          <h3>Drive</h3>
+          <div class="muted" id="connSub">Checking…</div>
+          <div class="stats" id="stats" style="display:none">
+            <div class="stat"><b id="cTotal">0</b><span>files</span></div>
+            <div class="stat"><b id="cIndexed">0</b><span>indexed</span></div>
+            <div class="stat"><b id="cPending">0</b><span>in queue</span></div>
+            <div class="stat"><b id="cError">0</b><span>errors</span></div>
+          </div>
         </div>
-        <label class="tg" id="pubWrap">
-          <input type="checkbox" id="pubOnUpload" />
-          <span>Public link</span>
-        </label>
-      </div>
-      <div class="note" id="upStatus"></div>
+      </section>
     </div>
 
-    <div class="card">
-      <div class="row" style="margin-bottom:6px">
-        <b id="filesTitle">Your files</b>
-        <span class="pill" id="filesCount"></span>
-      </div>
-      <div id="files"><div class="empty">Loading…</div></div>
-    </div>
-  </section>
-
-  <!-- SEARCH -->
-  <section id="pane-search" class="hide">
-    <div class="card">
-      <input type="search" id="q" placeholder="Search by meaning — e.g. “Q3 lease renewal”" />
-      <div id="results"></div>
-    </div>
-  </section>
-
-  <!-- PEOPLE (admins) -->
-  <section id="pane-people" class="hide">
-    <div class="card">
-      <div class="row"><div>
-        <b>Folders &amp; permissions</b>
-        <div class="muted" id="peopleSub">Each person's folder answers only for them. Shared answers for everyone.</div>
-      </div></div>
-      <div id="folders" style="margin-top:11px"></div>
-    </div>
-    <div class="card">
-      <div class="row"><div><b>Drive</b><div class="muted" id="connSub">Checking…</div></div></div>
-      <div class="stats" id="stats" style="display:none">
-        <div class="stat"><b id="cTotal">0</b><span>files</span></div>
-        <div class="stat"><b id="cIndexed">0</b><span>indexed</span></div>
-        <div class="stat"><b id="cPending">0</b><span>in queue</span></div>
-        <div class="stat"><b id="cError">0</b><span>errors</span></div>
-      </div>
-    </div>
-  </section>
+    <div class="drop hide" id="drop">Drop to upload here</div>
+  </main>
 </div>
 
 <script>
-// ---- session ---------------------------------------------------------------
-// The Eesa shell provides a UI-session token. Accept it from ?t= / #t= or an
-// injected global; the shell can be configured to pass whichever it uses.
+// ---------------------------------------------------------------------------
+// session — the shell hands the token over postMessage, not the URL.
+//     iframe -> parent   { type: 'eesa:plugin-ready' }
+//     parent -> iframe   { type: 'eesa:session', token, theme }
+// A ?t= / #t= token still wins when present, so the page stays debuggable
+// when opened directly.
+// ---------------------------------------------------------------------------
 const params = new URLSearchParams(location.search);
 const hash = new URLSearchParams(location.hash.slice(1));
 let TOKEN = params.get('t') || hash.get('t') || window.__EESA_UI_TOKEN__ || '';
 
-// The Eesa shell does NOT pass the token in the URL — it hands it over the
-// postMessage bridge, and only after the iframe says it is ready:
-//
-//     iframe -> parent   { type: 'eesa:plugin-ready' }
-//     parent -> iframe   { type: 'eesa:session', token, theme }
-//
-// (see PluginEmbed in the Eesa frontend). Reading only ?t=/#t= meant TOKEN was
-// '' inside the shell, so every call went out as `Bearer ` and the app showed
-// "missing bearer token" — which reads like a broken plugin rather than a
-// handshake that was never implemented. A URL token still wins when present,
-// so opening the page directly with ?t= keeps working for debugging.
 window.addEventListener('message', (ev) => {
   const d = ev.data || {};
   if (d.type !== 'eesa:session' || !d.token) return;
   TOKEN = d.token;
   if (d.theme) document.documentElement.dataset.theme = d.theme;
-  refresh();
+  boot();
 });
 if (window.parent && window.parent !== window) {
   window.parent.postMessage({ type: 'eesa:plugin-ready' }, '*');
@@ -216,89 +288,293 @@ function esc(t) {
     ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 }
 
-// alert() is unusable here. The Eesa shell embeds this page with
-// sandbox="allow-scripts allow-forms allow-same-origin allow-popups" — no
-// allow-modals — so Chrome swallows every alert silently, and a failure looked
-// like a dead button. Say it in the page instead.
+// alert()/confirm()/prompt() are all unusable here: the shell embeds this page
+// with sandbox="allow-scripts allow-forms allow-same-origin allow-popups" and
+// no allow-modals, so Chrome swallows them silently and a failure looks like a
+// dead button. Everything says its piece in the page instead.
 function say(id, msg, kind) {
   const el = $(id); if (!el) return;
   el.textContent = msg || '';
   el.className = 'note' + (kind ? ' ' + kind : '');
 }
 
-// ---- tabs ------------------------------------------------------------------
-function showTab(name) {
-  for (const t of ['files','search','people']) {
-    $('pane-' + t).classList.toggle('hide', t !== name);
-    $('tab-' + t).setAttribute('aria-selected', String(t === name));
+// ---------------------------------------------------------------------------
+// state
+// ---------------------------------------------------------------------------
+let YOU = { master:false, canUpload:true, canShare:true, employeeRef:'', email:'' };
+let TREE = { shared:{docCount:0}, folders:[] };
+let DOCS = [];
+let VIEW = 'files';                  // files | search | people
+let SCOPE = '';                      // '' = default set, 'shared', 'member:<ref>'
+let LAYOUT = localStorage.getItem('eesa.docs.layout') || 'list';
+let SORT = localStorage.getItem('eesa.docs.sort') || 'recent';
+
+const mineScope = () => (YOU.employeeRef ? 'member:' + YOU.employeeRef : '');
+
+// ---------------------------------------------------------------------------
+// formatting
+// ---------------------------------------------------------------------------
+function fmtSize(n) {
+  if (n == null) return '—';                     // Drive's own docs have no size
+  if (n < 1024) return n + ' B';
+  const u = ['KB','MB','GB','TB']; let v = n / 1024, i = 0;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return (v >= 10 ? Math.round(v) : v.toFixed(1)) + ' ' + u[i];
+}
+
+function fmtWhen(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso); if (isNaN(d)) return '—';
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  if (sameDay) return d.toLocaleTimeString([], { hour:'numeric', minute:'2-digit' });
+  const sameYear = d.getFullYear() === now.getFullYear();
+  return d.toLocaleDateString([], sameYear
+    ? { day:'numeric', month:'short' }
+    : { day:'numeric', month:'short', year:'numeric' });
+}
+
+// A file's kind, from its mime — drives both the label and the colour, so the
+// list is scannable without reading every filename.
+function kindOf(mime, title) {
+  const m = String(mime || '').toLowerCase();
+  const ext = String(title || '').split('.').pop().toLowerCase();
+  const is = (...xs) => xs.some((x) => m.includes(x));
+  if (is('pdf') || ext === 'pdf')                       return { k:'PDF',   c:'#d93025' };
+  if (is('spreadsheet','excel','csv') || ['xlsx','xls','csv'].includes(ext))
+                                                        return { k:'SHEET', c:'#0f9d58' };
+  if (is('presentation','powerpoint') || ['pptx','ppt'].includes(ext))
+                                                        return { k:'SLIDE', c:'#f4a300' };
+  if (is('word','document') || ['docx','doc','rtf','odt'].includes(ext))
+                                                        return { k:'DOC',   c:'#2f6bff' };
+  if (is('image'))                                      return { k:'IMG',   c:'#9334e6' };
+  if (is('video'))                                      return { k:'VID',   c:'#e8710a' };
+  if (is('audio'))                                      return { k:'AUD',   c:'#00897b' };
+  if (is('zip','compressed','tar'))                     return { k:'ZIP',   c:'#5f6368' };
+  if (is('text','plain','markdown') || ['txt','md'].includes(ext))
+                                                        return { k:'TXT',   c:'#5c6880' };
+  return { k:'FILE', c:'#5c6880' };
+}
+
+const icon = (d) => {
+  const { k, c } = kindOf(d.mime, d.title);
+  return '<span class="ficon" style="background:' + c + '">' + esc(k.slice(0,3)) + '</span>';
+};
+
+// ---------------------------------------------------------------------------
+// sidebar
+// ---------------------------------------------------------------------------
+function navBtn(id, label, count, iconTxt) {
+  const on = SCOPE === id && VIEW === 'files';
+  return '<button class="navitem" aria-current="' + (on ? 'true' : 'false')
+    + '" onclick="go(\'' + esc(id) + '\')">'
+    + '<span class="ic">' + iconTxt + '</span>'
+    + '<span class="lbl">' + esc(label) + '</span>'
+    + (count == null ? '' : '<span class="n">' + count + '</span>')
+    + '</button>';
+}
+
+function renderNav() {
+  let h = '';
+  h += navBtn('', YOU.master ? 'All files' : 'My files', null, '🗂');
+  h += navBtn('shared', 'Shared', TREE.shared?.docCount ?? null, '👥');
+  if (!YOU.master && mineScope()) {
+    h += navBtn(mineScope(), 'My folder', null, '📁');
   }
-  if (name === 'people') renderFolders();
-  if (name === 'search') $('q').focus();
-}
-
-// ---- state -----------------------------------------------------------------
-let YOU = { master:false, canUpload:true, canShare:true };
-let TARGET = 'mine';
-
-function setTarget(t) {
-  TARGET = t;
-  $('tgtMine').setAttribute('aria-pressed', String(t === 'mine'));
-  $('tgtShared').setAttribute('aria-pressed', String(t === 'shared'));
-  $('upWhere').textContent = t === 'shared'
-    ? 'Uploads into Shared — everyone in this workspace can read it.'
-    : 'Uploads into your own folder — only you and admins can read it.';
-}
-
-// ---- files -----------------------------------------------------------------
-async function renderFiles() {
-  const host = $('files');
-  try {
-    const res = await api('/documents?limit=100');
-    const docs = res.data || [];
-    YOU = res.you || YOU;
-
-    $('filesTitle').textContent = YOU.master ? 'All files in this workspace' : 'Your files';
-    $('lede').textContent = YOU.master
-      ? 'You are a master admin: you can see and edit every file in this workspace.'
-      : 'Your files stay in your Drive. Ask about them in chat.';
-    $('filesCount').textContent = docs.length + (docs.length === 1 ? ' file' : ' files');
-    $('tab-people').classList.toggle('hide', !YOU.master);
-    $('pubWrap').classList.toggle('hide', !YOU.canShare);
-
-    if (!docs.length) {
-      host.innerHTML = '<div class="empty">No files yet.<br>Upload one above, or send a file to Eesa in chat.</div>';
-      return;
+  if (YOU.master && TREE.folders.length) {
+    h += '<div class="navsec">People</div>';
+    for (const f of TREE.folders) {
+      h += navBtn('member:' + f.employeeRef,
+                  (f.name || f.email) + (f.mine ? ' (you)' : ''),
+                  f.docCount, '📁');
     }
-    host.innerHTML = docs.map(fileRow).join('');
+    h += '<div class="navsec">Admin</div>';
+    h += '<button class="navitem" aria-current="' + (VIEW === 'people' ? 'true' : 'false')
+       + '" onclick="showPeople()"><span class="ic">⚙️</span>'
+       + '<span class="lbl">Access &amp; permissions</span></button>';
+  }
+  $('nav').innerHTML = h;
+}
+
+function toggleSide() { $('side').classList.toggle('open'); }
+
+function go(scope) {
+  SCOPE = scope;
+  VIEW = 'files';
+  $('side').classList.remove('open');
+  render();
+  loadFiles();
+}
+
+function showPeople() {
+  VIEW = 'people';
+  $('side').classList.remove('open');
+  render();
+  renderFolders();
+}
+
+// The title tells you exactly whose files you are looking at — a master admin
+// browsing someone else's folder must never mistake it for their own.
+function crumbFor() {
+  if (VIEW === 'people') return { t:'Access & permissions', s:'Who can read, upload, and see everything' };
+  if (VIEW === 'search') return { t:'Search', s:'Semantic search across everything you can read' };
+  if (SCOPE === 'shared') return { t:'Shared', s:'Everyone in this workspace can read these' };
+  if (SCOPE && SCOPE.startsWith('member:')) {
+    const ref = SCOPE.slice(7);
+    if (ref === YOU.employeeRef) return { t:'My folder', s:'Only you and master admins can read these' };
+    const f = TREE.folders.find((x) => x.employeeRef === ref);
+    return { t:(f && (f.name || f.email)) || 'Member folder', s:"You are viewing someone else's folder" };
+  }
+  return YOU.master
+    ? { t:'All files', s:'Every folder in this workspace' }
+    : { t:'My files', s:'Your folder and everything shared with you' };
+}
+
+function render() {
+  const c = crumbFor();
+  $('crumbs').innerHTML = esc(c.t) + '<span class="sub">' + esc(c.s) + '</span>';
+  $('view-files').classList.toggle('hide', VIEW !== 'files');
+  $('view-search').classList.toggle('hide', VIEW !== 'search');
+  $('view-people').classList.toggle('hide', VIEW !== 'people');
+  $('viewBtn').textContent = LAYOUT === 'grid' ? '☰' : '▦';
+  $('sort').value = SORT;
+  $('sort').classList.toggle('hide', VIEW !== 'files');
+  // Upload goes into the folder you are LOOKING AT. There is no API for
+  // uploading into another member's folder, so rather than silently filing it
+  // somewhere else, the button says why it is off.
+  const t = uploadTarget();
+  const up = $('upBtn');
+  up.classList.toggle('hide', VIEW !== 'files');
+  if (t === null) {
+    up.setAttribute('aria-disabled', 'true');
+    up.style.opacity = '.45'; up.style.pointerEvents = 'none';
+    up.title = 'You cannot upload into someone else’s folder';
+  } else {
+    up.removeAttribute('aria-disabled');
+    up.style.opacity = ''; up.style.pointerEvents = '';
+    up.title = t === 'shared' ? 'Uploads into Shared' : 'Uploads into your own folder';
+  }
+  renderNav();
+}
+
+/** 'mine' | 'shared' | null (cannot upload here). */
+function uploadTarget() {
+  if (!YOU.canUpload) return null;
+  if (SCOPE === 'shared') return 'shared';
+  if (SCOPE && SCOPE.startsWith('member:') && SCOPE.slice(7) !== YOU.employeeRef) return null;
+  return 'mine';
+}
+
+// ---------------------------------------------------------------------------
+// files
+// ---------------------------------------------------------------------------
+function sortDocs(docs) {
+  const s = [...docs];
+  if (SORT === 'name') s.sort((a,b) => String(a.title||'').localeCompare(String(b.title||'')));
+  else if (SORT === 'size') s.sort((a,b) => (b.sizeBytes||0) - (a.sizeBytes||0));
+  else s.sort((a,b) => String(b.updatedAt||'').localeCompare(String(a.updatedAt||'')));
+  return s;
+}
+
+async function loadFiles() {
+  const host = $('files');
+  host.innerHTML = '<div class="empty">Loading…</div>';
+  try {
+    const qs = '?limit=200' + (SCOPE ? '&scope=' + encodeURIComponent(SCOPE) : '');
+    const res = await api('/documents' + qs);
+    DOCS = res.data || [];
+    YOU = { ...YOU, ...(res.you || {}) };
+    paintFiles();
+    render();
   } catch (e) {
-    host.innerHTML = '<div class="empty">Could not load files: ' + esc(e.message) + '</div>';
+    host.innerHTML = '<div class="empty"><b>Could not load files</b>' + esc(e.message) + '</div>';
   }
 }
 
-function fileRow(d) {
-  const where = d.shared ? 'Shared' : (d.owned ? 'Your folder' : 'Another folder');
-  const state = d.state === 'indexed' ? '' :
-    '<span class="pill ' + (d.state === 'error' ? 'err' : 'warn') + '">' + esc(d.state) + '</span>';
-  const pub = d.publicUrl ? '<span class="pill pub">Public</span>' : '';
-  const acts = [];
-  acts.push('<a href="' + esc(d.link) + '" target="_blank" rel="noopener">Open</a>');
-  if (d.downloadUrl) acts.push('<a href="' + esc(d.downloadUrl) + '" target="_blank" rel="noopener">Download</a>');
+function paintFiles() {
+  const host = $('files');
+  const docs = sortDocs(DOCS);
+  if (!docs.length) {
+    host.innerHTML = '<div class="empty"><b>Nothing here yet</b>'
+      + (uploadTarget() === null
+          ? 'This folder is empty.'
+          : 'Drop a file anywhere on this page, or use Upload.')
+      + '</div>';
+    return;
+  }
+  host.innerHTML = LAYOUT === 'grid'
+    ? '<div class="grid">' + docs.map(tile).join('') + '</div>'
+    : '<div class="lhead"><span>Name</span><span>Folder</span><span>Size</span>'
+      + '<span class="r">Modified</span></div>' + docs.map(row).join('');
+}
+
+function whereOf(d) {
+  if (d.shared) return 'Shared';
+  if (d.owned) return 'My folder';
+  const ref = String(d.scope || '').startsWith('member:') ? d.scope.slice(7) : '';
+  const f = TREE.folders.find((x) => x.employeeRef === ref);
+  return f ? (f.name || f.email) : 'Another folder';
+}
+
+function pillsOf(d) {
+  let p = '';
+  if (d.state && d.state !== 'indexed') {
+    p += '<span class="pill ' + (d.state === 'error' ? 'err' : 'warn') + '">' + esc(d.state) + '</span>';
+  }
+  if (d.publicUrl) p += '<span class="pill pub">Public</span>';
+  return p;
+}
+
+function actsOf(d) {
+  const a = [];
+  a.push('<a href="' + esc(d.link) + '" target="_blank" rel="noopener">Open</a>');
+  if (d.downloadUrl) a.push('<a href="' + esc(d.downloadUrl) + '" target="_blank" rel="noopener">Download</a>');
   if (d.canEdit && YOU.canShare) {
-    acts.push(d.publicUrl
-      ? '<button class="ghost" onclick="share(this,\'' + esc(d.id) + '\',false)">Unshare</button>'
-      : '<button class="ghost" onclick="share(this,\'' + esc(d.id) + '\',true)">Share link</button>');
+    a.push(d.publicUrl
+      ? '<button onclick="share(this,\'' + esc(d.id) + '\',false)">Unshare</button>'
+      : '<button onclick="share(this,\'' + esc(d.id) + '\',true)">Share link</button>');
   }
   if (d.canEdit) {
-    acts.push('<button class="ghost" onclick="rename(this,\'' + esc(d.id) + '\')">Rename</button>');
-    acts.push('<button class="ghost" onclick="remove(this,\'' + esc(d.id) + '\')">Delete</button>');
+    a.push('<button onclick="rename(this,\'' + esc(d.id) + '\')">Rename</button>');
+    a.push('<button class="danger" onclick="remove(this,\'' + esc(d.id) + '\')">Delete</button>');
   }
-  return '<div class="frow" data-id="' + esc(d.id) + '">'
-    + '<div class="fmain"><b>' + esc(d.title || 'Untitled') + '</b>'
-    + '<div class="meta"><span>' + esc(where) + '</span>' + state + pub + '</div>'
-    + '<div class="note" id="n-' + esc(d.id) + '"></div></div>'
-    + '<div class="fctl">' + acts.join('') + '</div></div>';
+  return a.join('');
 }
 
+function row(d) {
+  return '<div class="row" data-id="' + esc(d.id) + '">'
+    + '<div class="name">' + icon(d) + '<div style="min-width:0">'
+    + '<b>' + esc(d.title || 'Untitled') + '</b>'
+    + '<div class="note" id="n-' + esc(d.id) + '"></div></div></div>'
+    + '<div class="where">' + esc(whereOf(d)) + ' ' + pillsOf(d) + '</div>'
+    + '<div class="where">' + esc(fmtSize(d.sizeBytes)) + '</div>'
+    + '<div class="acts">' + actsOf(d) + '</div>'
+    + '<div class="when" style="grid-column:4;text-align:right;font-size:12px">'
+    + esc(fmtWhen(d.updatedAt)) + '</div>'
+    + '</div>';
+}
+
+function tile(d) {
+  return '<div class="tile" data-id="' + esc(d.id) + '">'
+    + '<div class="top">' + icon(d) + '<b>' + esc(d.title || 'Untitled') + '</b></div>'
+    + '<div class="meta">' + esc(whereOf(d)) + ' · ' + esc(fmtSize(d.sizeBytes))
+    + ' · ' + esc(fmtWhen(d.updatedAt)) + ' ' + pillsOf(d) + '</div>'
+    + '<div class="note" id="n-' + esc(d.id) + '"></div>'
+    + '<div class="acts">' + actsOf(d) + '</div></div>';
+}
+
+function toggleLayout() {
+  LAYOUT = LAYOUT === 'grid' ? 'list' : 'grid';
+  localStorage.setItem('eesa.docs.layout', LAYOUT);
+  paintFiles(); render();
+}
+function setSort(v) {
+  SORT = v; localStorage.setItem('eesa.docs.sort', v); paintFiles();
+}
+
+// ---------------------------------------------------------------------------
+// file actions
+// ---------------------------------------------------------------------------
 async function share(btn, id, want) {
   btn.disabled = true;
   try {
@@ -311,12 +587,12 @@ async function share(btn, id, want) {
       // write can be refused inside a sandboxed iframe, and a "Copied!" that
       // silently did nothing is worse than no button.
       let copied = false;
-      try { await navigator.clipboard.writeText(url); copied = true; } catch (e) { /* shown below instead */ }
+      try { await navigator.clipboard.writeText(url); copied = true; } catch (e) { /* shown below */ }
       say('n-' + id, (copied ? 'Link copied — ' : 'Public link: ') + url, 'ok');
     } else {
       say('n-' + id, 'Public link revoked.', 'ok');
     }
-    setTimeout(renderFiles, 1400);
+    setTimeout(loadFiles, 1400);
   } catch (e) {
     say('n-' + id, 'Could not change sharing: ' + e.message, 'err');
   }
@@ -324,13 +600,12 @@ async function share(btn, id, want) {
 }
 
 async function rename(btn, id) {
-  const row = btn.closest('.frow');
-  const cur = row.querySelector('b').textContent;
-  // prompt() is a modal too — same sandbox problem as alert(). Edit in place.
+  const wrap = btn.closest('.row') || btn.closest('.tile');
+  const label = wrap.querySelector('b');
+  const cur = label.textContent;
   const box = document.createElement('input');
-  box.type = 'text'; box.value = cur; box.style.marginTop = '6px';
-  const main = row.querySelector('.fmain');
-  main.appendChild(box); box.focus(); box.select();
+  box.type = 'text'; box.value = cur; box.style.width = '100%'; box.style.marginTop = '6px';
+  label.after(box); box.focus(); box.select();
   const done = async (commit) => {
     const name = box.value.trim();
     box.remove();
@@ -339,7 +614,7 @@ async function rename(btn, id) {
       await api('/documents/' + encodeURIComponent(id), {
         method: 'PATCH', body: JSON.stringify({ title: name }),
       });
-      renderFiles();
+      loadFiles();
     } catch (e) { say('n-' + id, 'Rename failed: ' + e.message, 'err'); }
   };
   box.onkeydown = (e) => { if (e.key === 'Enter') done(true); if (e.key === 'Escape') done(false); };
@@ -360,44 +635,71 @@ async function remove(btn, id) {
   btn.disabled = true;
   try {
     await api('/documents/' + encodeURIComponent(id), { method: 'DELETE' });
-    renderFiles();
+    loadFiles();
   } catch (e) {
     say('n-' + id, 'Delete failed: ' + e.message, 'err');
     btn.disabled = false; btn.dataset.armed = ''; btn.textContent = 'Delete';
   }
 }
 
-// ---- upload ----------------------------------------------------------------
-// Raw fetch: FormData sets its own multipart Content-Type — don't force JSON.
-$('file').onchange = async (e) => {
-  const files = [...e.target.files]; e.target.value = '';
+// ---------------------------------------------------------------------------
+// upload — button and drag-and-drop, both filing into the folder on screen
+// ---------------------------------------------------------------------------
+async function uploadAll(files) {
+  const target = uploadTarget();
+  if (target === null) {
+    say('upStatus', 'You cannot upload into that folder.', 'err');
+    return;
+  }
   for (const f of files) {
     say('upStatus', 'Uploading ' + f.name + '…');
     try {
+      // Raw fetch: FormData sets its own multipart Content-Type — don't force JSON.
       const fd = new FormData();
       fd.append('file', f);
-      fd.append('target', TARGET);
-      if ($('pubOnUpload').checked) fd.append('public', 'true');
+      fd.append('target', target);
       const r = await fetch('/api/upload', {
         method: 'POST', headers: { Authorization: 'Bearer ' + TOKEN }, body: fd,
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error((j.error && (j.error.message || j.error)) || ('HTTP ' + r.status));
-      const link = j.data && j.data.public && j.data.public.link;
-      say('upStatus', 'Uploaded ' + f.name + ' — indexing…' + (link ? ' Public link: ' + link : ''), 'ok');
+      say('upStatus', 'Uploaded ' + f.name + ' — indexing…', 'ok');
     } catch (err) {
       say('upStatus', 'Upload failed: ' + err.message, 'err');
+      return;
     }
   }
-  setTimeout(refresh, 1400);
-};
+  setTimeout(() => { loadFiles(); refreshStatus(); }, 1400);
+}
 
-// ---- search ----------------------------------------------------------------
+$('file').onchange = (e) => { const fs = [...e.target.files]; e.target.value = ''; uploadAll(fs); };
+
+let dragDepth = 0;
+window.addEventListener('dragenter', (e) => {
+  if (VIEW !== 'files' || uploadTarget() === null) return;
+  if (![...(e.dataTransfer?.types || [])].includes('Files')) return;
+  dragDepth++; $('drop').classList.remove('hide');
+});
+window.addEventListener('dragover', (e) => { if (!$('drop').classList.contains('hide')) e.preventDefault(); });
+window.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; $('drop').classList.add('hide'); } });
+window.addEventListener('drop', (e) => {
+  if ($('drop').classList.contains('hide')) return;
+  e.preventDefault();
+  dragDepth = 0; $('drop').classList.add('hide');
+  const fs = [...(e.dataTransfer?.files || [])];
+  if (fs.length) uploadAll(fs);
+});
+
+// ---------------------------------------------------------------------------
+// search
+// ---------------------------------------------------------------------------
 let searchTimer;
 $('q').oninput = (e) => {
   clearTimeout(searchTimer);
   const q = e.target.value.trim();
-  if (!q) { $('results').innerHTML = ''; return; }
+  if (!q) { VIEW = 'files'; render(); paintFiles(); return; }
+  VIEW = 'search'; render();
+  $('results').innerHTML = '<div class="empty">Searching…</div>';
   searchTimer = setTimeout(async () => {
     try {
       const hits = (await api('/search?q=' + encodeURIComponent(q))).data || [];
@@ -407,46 +709,45 @@ $('q').oninput = (e) => {
             + esc(h.title || 'Untitled') + '</a>'
             + (h.downloadUrl ? ' <a href="' + esc(h.downloadUrl) + '" target="_blank" rel="noopener" style="font-size:12px">download</a>' : '')
             + '<p>' + esc((h.snippet || '').slice(0, 260)) + '</p></div>').join('')
-        : '<div class="hit muted">No matches in the documents you can read.</div>';
+        : '<div class="empty"><b>No matches</b>Nothing in the documents you can read matched that.</div>';
     } catch (err) {
-      $('results').innerHTML = '<div class="hit muted">' + esc(err.message) + '</div>';
+      $('results').innerHTML = '<div class="empty"><b>Search failed</b>' + esc(err.message) + '</div>';
     }
   }, 280);
 };
 
-// ---- people (master admin) --------------------------------------------------
-// This lists FOLDERS, never their contents — who has a folder is directory
-// information; what is inside it is not.
+// ---------------------------------------------------------------------------
+// people (master admin) — lists FOLDERS, never their contents. Who has a
+// folder is directory information; what is inside it is not.
+// ---------------------------------------------------------------------------
 async function renderFolders() {
   const host = $('folders');
   if (!host) return;
   try {
-    const { data } = await api('/folders');
-    const { shared } = data;
-    let html = frow('Shared', 'everyone in this workspace', shared.docCount, true);
     let members = null;
     try { members = await api('/members'); } catch (e) { /* not an admin */ }
+    let html = prow('Shared', 'Everyone in this workspace', TREE.shared?.docCount ?? null, true);
     if (members) {
       for (const m of members.data) html += memberRow(m, members.youAreMaster);
       $('peopleSub').textContent = members.data.length
         + ' member' + (members.data.length === 1 ? '' : 's')
         + ' — each folder answers only for that person.';
     } else {
-      for (const f of data.folders) {
-        html += frow(f.email + (f.mine ? ' (you)' : ''), 'your folder', f.docCount ?? null, false);
+      for (const f of TREE.folders) {
+        html += prow(f.email + (f.mine ? ' (you)' : ''), 'Personal folder', f.docCount ?? null, false);
       }
     }
     host.innerHTML = html;
   } catch (e) {
-    host.innerHTML = '<div class="empty">Folders unavailable: ' + esc(e.message) + '</div>';
+    host.innerHTML = '<div class="empty"><b>Folders unavailable</b>' + esc(e.message) + '</div>';
   }
 }
 
-function frow(title, sub, count, isShared) {
-  return '<div class="frow"><div class="fmain"><b>' + esc(title) + '</b>'
-    + '<div class="meta">' + esc(sub) + '</div></div>'
+function prow(title, sub, count, isShared) {
+  return '<div class="prow"><div style="min-width:0"><b>' + esc(title) + '</b>'
+    + '<div class="muted">' + esc(sub) + '</div></div>'
     + '<span class="pill' + (isShared ? ' ok' : '') + '">'
-    + (count === null ? 'folder' : count + ' file' + (count === 1 ? '' : 's'))
+    + (count == null ? 'folder' : count + ' file' + (count === 1 ? '' : 's'))
     + '</span></div>';
 }
 
@@ -458,11 +759,12 @@ function memberRow(m, youAreMaster) {
   const who = esc(m.email) + (m.you ? ' (you)' : '');
   const meta = [m.name, m.role].filter(Boolean).map(esc).join(' · ')
     || (m.hasFolder ? 'folder ready' : 'no folder yet');
-  const masterPill = m.master ? '<span class="pill pub">Master</span>' : '';
-  return '<div class="frow" data-ref="' + esc(m.employeeRef) + '">'
-    + '<div class="fmain"><b>' + who + '</b><div class="meta">' + meta + masterPill + '</div>'
+  const masterPill = m.master ? ' <span class="pill pub">Master</span>' : '';
+  return '<div class="prow" data-ref="' + esc(m.employeeRef) + '">'
+    + '<div style="min-width:0"><b>' + who + '</b>'
+    + '<div class="muted">' + meta + masterPill + '</div>'
     + '<div class="note" id="p-' + esc(m.employeeRef) + '"></div></div>'
-    + '<div class="fctl">'
+    + '<div class="acts">'
     + '<span class="pill">' + m.docCount + ' file' + (m.docCount === 1 ? '' : 's') + '</span>'
     + toggle(m.employeeRef, 'canRead', m.canRead, 'Read')
     + toggle(m.employeeRef, 'canUpload', m.canUpload, 'Upload')
@@ -493,6 +795,7 @@ async function setPerm(el, ref, field) {
     }
     wrap.classList.toggle('on', want);
     say('p-' + ref, '');
+    loadTree();                       // the counts and the sidebar just changed
   } catch (e) {
     // Put the switch back: a control that looks changed but did not save is
     // worse than one that refuses, because the admin walks away believing it.
@@ -502,31 +805,49 @@ async function setPerm(el, ref, field) {
   el.disabled = false;
 }
 
-// ---- refresh ---------------------------------------------------------------
-async function refresh() {
-  if (!TOKEN) return;
-  renderFiles();
+// ---------------------------------------------------------------------------
+// status + boot
+// ---------------------------------------------------------------------------
+async function loadTree() {
+  try {
+    const { data } = await api('/folders');
+    TREE = { shared: data.shared || { docCount: 0 }, folders: data.folders || [] };
+    renderNav();
+  } catch (e) { /* sidebar just shows less */ }
+}
+
+async function refreshStatus() {
   try {
     const { data } = await api('/status');
     const { connection, counts, pending } = data;
     const connected = connection && connection.status !== 'disconnected';
-    const pill = $('connPill');
-    pill.className = 'pill ' + (connection?.status === 'error' ? 'err'
+    const dot = $('dot');
+    dot.className = 'dot ' + (connection?.status === 'error' ? 'err'
       : connection?.status === 'syncing' ? 'warn' : connected ? 'ok' : '');
-    pill.textContent = connection ? connection.status : 'not connected';
+    $('sidefoot').textContent = connected
+      ? (connection.accountEmail || 'Drive connected')
+      : 'Drive not connected yet';
     $('connSub').textContent = connected ? (connection.accountEmail || 'connected') : 'Not connected yet';
     $('stats').style.display = connected ? 'grid' : 'none';
     $('cTotal').textContent = counts.total; $('cIndexed').textContent = counts.indexed;
     $('cPending').textContent = pending; $('cError').textContent = counts.error;
   } catch (e) {
-    $('connSub').textContent = 'Could not load status: ' + e.message;
+    $('sidefoot').textContent = 'Status unavailable';
   }
 }
 
-refresh();
+async function boot() {
+  if (!TOKEN) return;
+  await loadFiles();      // establishes YOU (master, canUpload, employeeRef)
+  await loadTree();
+  render();
+  refreshStatus();
+}
+
+boot();
 // Slow poll: enough to show indexing finishing, not so much that a phone on
 // mobile data pays for it.
-setInterval(refresh, 12000);
+setInterval(() => { if (TOKEN && VIEW === 'files') { loadFiles(); refreshStatus(); } }, 12000);
 </script>
 </body>
 </html>
