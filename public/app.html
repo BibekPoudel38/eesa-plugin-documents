@@ -103,12 +103,12 @@
   .body{flex:1;min-height:0;overflow-y:auto;padding:14px 16px 40px}
 
   /* ---- file list ---- */
-  .lhead{display:grid;grid-template-columns:1fr 130px 110px 1fr;gap:12px;
-         padding:0 10px 8px;color:var(--mut);font-size:11.5px;font-weight:650;
+  .lhead,.row{display:grid;gap:12px;
+       grid-template-columns:minmax(0,1fr) 132px 84px 92px minmax(0,auto)}
+  .lhead{padding:0 10px 8px;color:var(--mut);font-size:11.5px;font-weight:650;
          letter-spacing:.04em;text-transform:uppercase;border-bottom:1px solid var(--line)}
-  .lhead .r{text-align:right}
-  .row{display:grid;grid-template-columns:1fr 130px 110px 1fr;gap:12px;align-items:center;
-       padding:9px 10px;border-radius:9px;border-bottom:1px solid var(--line)}
+  .row{align-items:center;padding:9px 10px;border-radius:9px;
+       border-bottom:1px solid var(--line)}
   .row:hover{background:var(--soft)}
   .name{display:flex;align-items:center;gap:11px;min-width:0}
   .name b{font-weight:550;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -505,7 +505,7 @@ function paintFiles() {
   host.innerHTML = LAYOUT === 'grid'
     ? '<div class="grid">' + docs.map(tile).join('') + '</div>'
     : '<div class="lhead"><span>Name</span><span>Folder</span><span>Size</span>'
-      + '<span class="r">Modified</span></div>' + docs.map(row).join('');
+      + '<span>Modified</span><span></span></div>' + docs.map(row).join('');
 }
 
 function whereOf(d) {
@@ -548,9 +548,8 @@ function row(d) {
     + '<div class="note" id="n-' + esc(d.id) + '"></div></div></div>'
     + '<div class="where">' + esc(whereOf(d)) + ' ' + pillsOf(d) + '</div>'
     + '<div class="where">' + esc(fmtSize(d.sizeBytes)) + '</div>'
+    + '<div class="when">' + esc(fmtWhen(d.updatedAt)) + '</div>'
     + '<div class="acts">' + actsOf(d) + '</div>'
-    + '<div class="when" style="grid-column:4;text-align:right;font-size:12px">'
-    + esc(fmtWhen(d.updatedAt)) + '</div>'
     + '</div>';
 }
 
