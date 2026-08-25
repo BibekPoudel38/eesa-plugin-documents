@@ -408,18 +408,27 @@ export async function canUpload(tenantId, employeeRef) {
 /** The admin panel's roster: every member, their permissions, their folder and
  *  how much is in it. */
 export async function listMembersWithFolders(tenantId) {
+  // FULL OUTER, not "from members": the two tables are populated by different
+  // events and either can exist alone. A member row is written when somebody is
+  // provisioned; a folder row is written the first time somebody actually uses
+  // Documents. Joining out of `members` made anyone who had only ever USED the
+  // app invisible — the admin screen said "No folder yet" about people whose
+  // folder held their files, which is the one claim it exists to make.
   return q(
-    `select m.employee_ref, m.name, m.email, m.role, m.active,
-            m.can_read, m.can_upload, m.is_master,
+    `select coalesce(m.employee_ref, f.employee_ref)   as employee_ref,
+            m.name,
+            coalesce(nullif(m.email, ''), f.email)     as email,
+            m.role, m.active, m.can_read, m.can_upload, m.is_master,
             f.folder_id,
             (select count(*) from documents d
-              where d.tenant_id = m.tenant_id
-                and d.scope = 'member:' || m.employee_ref) as doc_count
+              where d.tenant_id = coalesce(m.tenant_id, f.tenant_id)
+                and d.scope = 'member:' || coalesce(m.employee_ref, f.employee_ref)
+            ) as doc_count
        from members m
-       left join member_folders f
+       full outer join member_folders f
          on f.tenant_id = m.tenant_id and f.employee_ref = m.employee_ref
-      where m.tenant_id = $1
-      order by m.created_at asc`, [tenantId]);
+      where coalesce(m.tenant_id, f.tenant_id) = $1
+      order by coalesce(m.created_at, f.created_at) asc`, [tenantId]);
 }
 
 /** Is this caller a master admin — every folder, every file, edit rights?
