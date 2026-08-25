@@ -143,6 +143,63 @@ export async function ensureSharedFolder(tenantId) {
   return id;
 }
 
+/** Should this member be granted access to their own folder, and with what?
+ *
+ *  The folder sits in the workspace's connected Drive, owned by whoever
+ *  attached it — so creating one named after somebody granted them nothing.
+ *  Every "Saved to your Drive folder" link handed to a member 403'd for the
+ *  one person it was addressed to. Drive inherits folder permissions down to
+ *  contents, so a single grant covers everything they file from now on.
+ *
+ *  Pure, and exported, because the decision is the part worth pinning: who is
+ *  skipped, and that the notification stays off. Returns the Drive request, or
+ *  null when there is nothing to do.
+ */
+export function ownerGrantPlan({ email, folderId, ownerGranted = false } = {}) {
+  // Already done. Checked from our own mirror rather than by asking Drive,
+  // so a member who uploads daily costs one round-trip in total, not one each.
+  if (ownerGranted) return null;
+  // A token without an email claim (the gateway shape) names nobody to grant
+  // to. Skipping leaves owner_granted false, so the next call that DOES carry
+  // an address still fixes it.
+  if (!email || !folderId) return null;
+  return {
+    fileId: folderId,
+    // Reader, not writer: they read and download their documents, while adding
+    // and removing files stays with the plugin — which is what keeps the
+    // search index and the folder saying the same thing.
+    requestBody: { role: 'reader', type: 'user', emailAddress: email },
+    // Google emails the recipient by default. Member folders are created the
+    // first time each person touches Documents, so leaving this on would put
+    // "somebody shared a folder with you" in every employee's inbox on the day
+    // this ships — for a folder they already thought was theirs.
+    sendNotificationEmail: false,
+    supportsAllDrives: true,
+  };
+}
+
+/** Is this error the end state we wanted anyway? Re-granting an existing
+ *  permission is not a failure, and must still be recorded — otherwise the
+ *  backfill retries it on every single upload, forever. */
+export function grantAlreadyHeld(message) {
+  return /already|duplicate/i.test(String(message || ''));
+}
+
+/** Run a plan from ownerGrantPlan. Never fatal: a failed grant must not cost
+ *  somebody their upload, so this reports and returns, leaving owner_granted
+ *  false so the next upload tries again. */
+async function applyOwnerGrant(tenantId, drive, employeeRef, plan) {
+  try {
+    await drive.permissions.create(plan);
+  } catch (e) {
+    if (!grantAlreadyHeld(e?.message)) {
+      console.warn('applyOwnerGrant:', employeeRef, String(e?.message || e));
+      return;
+    }
+  }
+  await db.markFolderGranted(tenantId, employeeRef);
+}
+
 /** One person's folder: Eesa Documents/members/<email>.
  *  Named by email so a human can find it in Drive; the PERMISSION is keyed on
  *  employeeRef in member_folders, so renaming a mailbox cannot hand someone
@@ -154,7 +211,20 @@ export async function ensureMemberFolder(tenantId, { employeeRef, email }) {
   // SECOND folder for the same person — splitting their documents across two
   // scopes and silently orphaning whatever was already filed.
   const known = await db.getMemberFolder(tenantId, employeeRef);
-  if (known?.folder_id) return known.folder_id;
+  if (known?.folder_id) {
+    // Backfill. Folders made before members were granted access carry no
+    // permission, and the early return here means they would never acquire
+    // one — leaving the people who have used Documents longest as exactly the
+    // ones whose links keep failing.
+    const plan = ownerGrantPlan({
+      email, folderId: known.folder_id, ownerGranted: known.owner_granted,
+    });
+    if (plan) {
+      const drive = await driveFor(tenantId);
+      if (drive) await applyOwnerGrant(tenantId, drive, employeeRef, plan);
+    }
+    return known.folder_id;
+  }
 
   const drive = await driveFor(tenantId);
   const root = await ensureFolder(tenantId);
@@ -162,6 +232,8 @@ export async function ensureMemberFolder(tenantId, { employeeRef, email }) {
   const membersId = await ensureSubfolder(drive, MEMBERS_NAME, root);
   const folderId = await ensureSubfolder(drive, email || employeeRef, membersId);
   await db.upsertMemberFolder(tenantId, { employeeRef, email: email || '', folderId });
+  const plan = ownerGrantPlan({ email, folderId });
+  if (plan) await applyOwnerGrant(tenantId, drive, employeeRef, plan);
   return folderId;
 }
 

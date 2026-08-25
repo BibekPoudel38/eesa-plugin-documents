@@ -106,6 +106,16 @@ create table if not exists member_folders (
 );
 create index if not exists member_folders_tenant_idx on member_folders (tenant_id);
 
+-- Has the member been granted access to their OWN folder in Drive?
+--
+-- The folder lives in the workspace's connected Drive, owned by whoever
+-- attached it. Creating a folder named after somebody does not let them open
+-- it, so every "Saved to your Drive folder" link 403'd for the one person it
+-- was addressed to. The grant fixes that; this column records that it happened
+-- so an existing folder gets backfilled exactly once rather than costing a
+-- Drive round-trip on every upload.
+alter table member_folders add column if not exists owner_granted boolean not null default false;
+
 
 -- One-time links that start the OAuth grant from a plain browser tab.
 --

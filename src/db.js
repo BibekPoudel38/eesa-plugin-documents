@@ -513,6 +513,18 @@ export async function upsertMemberFolder(tenantId, { employeeRef, email = '', fo
   return rows[0];
 }
 
+/** Record that the member now has Drive access to their own folder, so the
+ *  backfill in ensureMemberFolder runs once per person rather than on every
+ *  upload. Only ever set true — a grant somebody revokes by hand in Drive is
+ *  their decision, and re-adding it on the next upload would fight them. */
+export async function markFolderGranted(tenantId, employeeRef) {
+  await q(
+    `update member_folders set owner_granted = true
+      where tenant_id = $1 and employee_ref = $2`,
+    [tenantId, employeeRef],
+  );
+}
+
 /** Which scope a file belongs to, from the Drive folder it sits in.
  *  Unknown folder -> '' -> indexed but readable by nobody, which is the safe
  *  direction: a misfiled document is invisible rather than public. */
