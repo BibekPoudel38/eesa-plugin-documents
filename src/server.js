@@ -273,14 +273,16 @@ async function ensureFolderForCaller(ctx, role) {
   try {
     const conn = await db.getConnection(ctx.tenantId, 'google_drive');
     if (!conn) return;                       // nothing to create it in yet
+    const email = ctx.raw?.email || ctx.email || '';
     const existing = await db.getMemberFolder(ctx.tenantId, ctx.sub);
-    if (existing) return;
+    // A folder they can already open: nothing to do. A folder they CANNOT —
+    // every one made before members were granted access — is repaired here
+    // rather than on their next upload, so the dead links they were already
+    // sent start working as soon as they open Documents.
+    if (existing && (existing.owner_granted || !email)) return;
     const gd = getProvider('google_drive');
-    await gd.ensureSharedFolder(ctx.tenantId);
-    await gd.ensureMemberFolder(ctx.tenantId, {
-      employeeRef: ctx.sub,
-      email: ctx.raw?.email || ctx.email || '',
-    });
+    if (!existing) await gd.ensureSharedFolder(ctx.tenantId);
+    await gd.ensureMemberFolder(ctx.tenantId, { employeeRef: ctx.sub, email });
   } catch (e) {
     console.warn('ensureFolderForCaller:', e.message);
   }
