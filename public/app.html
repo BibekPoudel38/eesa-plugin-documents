@@ -306,8 +306,24 @@ let TREE = { shared:{docCount:0}, folders:[] };
 let DOCS = [];
 let VIEW = 'files';                  // files | search | people
 let SCOPE = '';                      // '' = default set, 'shared', 'member:<ref>'
-let LAYOUT = localStorage.getItem('eesa.docs.layout') || 'list';
-let SORT = localStorage.getItem('eesa.docs.sort') || 'recent';
+// localStorage, but survivable.
+//
+// This page runs as a THIRD-PARTY iframe inside Eesa, and in that position
+// storage is not guaranteed: Safari blocks it outright, Firefox partitions it,
+// and Chrome does the same once third-party cookies are off. An unguarded
+// getItem throws a SecurityError, and because this is a classic script the
+// throw aborts the rest of the file — no boot(), no handshake, and a silently
+// blank panel. A remembered layout is a nicety; losing the whole app over it
+// is not a trade worth making.
+function prefGet(k, fallback) {
+  try { return localStorage.getItem(k) || fallback; } catch (e) { return fallback; }
+}
+function prefSet(k, v) {
+  try { localStorage.setItem(k, v); } catch (e) { /* not remembered; fine */ }
+}
+
+let LAYOUT = prefGet('eesa.docs.layout', 'list');
+let SORT = prefGet('eesa.docs.sort', 'recent');
 
 const mineScope = () => (YOU.employeeRef ? 'member:' + YOU.employeeRef : '');
 
@@ -564,11 +580,11 @@ function tile(d) {
 
 function toggleLayout() {
   LAYOUT = LAYOUT === 'grid' ? 'list' : 'grid';
-  localStorage.setItem('eesa.docs.layout', LAYOUT);
+  prefSet('eesa.docs.layout', LAYOUT);
   paintFiles(); render();
 }
 function setSort(v) {
-  SORT = v; localStorage.setItem('eesa.docs.sort', v); paintFiles();
+  SORT = v; prefSet('eesa.docs.sort', v); paintFiles();
 }
 
 // ---------------------------------------------------------------------------
