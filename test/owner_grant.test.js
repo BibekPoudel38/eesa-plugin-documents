@@ -11,7 +11,7 @@
 // is skipped, what role they get, and that Google does not email them.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ownerGrantPlan, grantAlreadyHeld } from '../src/providers/google_drive.js';
+import { ownerGrantPlan, grantSettled, grantSucceeded } from '../src/providers/google_drive.js';
 
 const FOLDER = '1AbCdEfGhIjKlMnOpQrStUvWxYz';
 
@@ -65,16 +65,30 @@ test('nobody to grant to, and nothing to grant on, are both skipped', () => {
 
 test('a grant that was already there counts as done', () => {
   // Otherwise owner_granted never gets set and every upload re-attempts it.
-  assert.equal(grantAlreadyHeld('The user already has access to this file.'), true);
-  assert.equal(grantAlreadyHeld('duplicate permission'), true);
+  assert.equal(grantSettled('The user already has access to this file.'), true);
+  assert.equal(grantSettled('duplicate permission'), true);
+  assert.equal(grantSucceeded('The user already has access to this file.'), true);
 });
 
-test('a real failure does NOT count as done', () => {
+test('an address with no Google account is terminal, not retried', () => {
+  // The live workspace signs in as anbu@chupy.com while the drive belongs to
+  // chups.com; those logins are not mailboxes, and Drive refuses to grant to
+  // them at all while sendNotificationEmail is false. Retrying every upload
+  // cannot fix it, so we stop — but it did NOT succeed, and saying otherwise
+  // would hide why their link keeps 403ing.
+  const err = 'You are trying to invite anbu@chupy.com. Since there is no Google '
+            + 'account associated with this email address, you must check the '
+            + '"Notify people" box to invite this recipient.';
+  assert.equal(grantSettled(err), true, 'would retry forever');
+  assert.equal(grantSucceeded(err), false, 'would claim access nobody has');
+});
+
+test('a transient failure IS retried', () => {
   // Recording these would strand the member permanently: never granted, never
   // retried, and the link keeps failing with nothing left to notice it.
-  assert.equal(grantAlreadyHeld('Insufficient permissions'), false);
-  assert.equal(grantAlreadyHeld('Rate Limit Exceeded'), false);
-  assert.equal(grantAlreadyHeld('Invalid sharing request: bad email'), false);
-  assert.equal(grantAlreadyHeld(''), false);
-  assert.equal(grantAlreadyHeld(undefined), false);
+  for (const m of ['Insufficient permissions', 'Rate Limit Exceeded',
+                   'Internal Error', '', undefined]) {
+    assert.equal(grantSettled(m), false, `stopped retrying on: ${m}`);
+    assert.equal(grantSucceeded(m), false);
+  }
 });

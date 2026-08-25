@@ -178,10 +178,26 @@ export function ownerGrantPlan({ email, folderId, ownerGranted = false } = {}) {
   };
 }
 
-/** Is this error the end state we wanted anyway? Re-granting an existing
- *  permission is not a failure, and must still be recorded — otherwise the
- *  backfill retries it on every single upload, forever. */
-export function grantAlreadyHeld(message) {
+/** Is there any point trying this grant again?
+ *
+ *  Two different reasons to stop, both recorded the same way so the backfill
+ *  does not retry on every upload forever:
+ *
+ *  - the permission is already there, which is the end state we wanted;
+ *  - the address has no Google account behind it, which Drive refuses outright
+ *    while sendNotificationEmail is false. Workspaces whose Eesa logins are not
+ *    real mailboxes hit this for every member, and retrying cannot fix it —
+ *    a public link is the only thing that reaches those people.
+ */
+export function grantSettled(message) {
+  const m = String(message || '');
+  if (/already|duplicate/i.test(m)) return true;
+  return /no Google account|not a valid email|invalid sharing request|notify people/i.test(m);
+}
+
+/** Did the grant actually land, or did we merely stop trying? Kept separate so
+ *  a caller can tell "they can open it" from "nobody could have". */
+export function grantSucceeded(message) {
   return /already|duplicate/i.test(String(message || ''));
 }
 
@@ -192,9 +208,18 @@ async function applyOwnerGrant(tenantId, drive, employeeRef, plan) {
   try {
     await drive.permissions.create(plan);
   } catch (e) {
-    if (!grantAlreadyHeld(e?.message)) {
-      console.warn('applyOwnerGrant:', employeeRef, String(e?.message || e));
+    const msg = String(e?.message || e);
+    if (!grantSettled(msg)) {
+      // Transient or unexpected: leave it unrecorded so the next upload retries.
+      console.warn('applyOwnerGrant RETRY', employeeRef, msg);
       return;
+    }
+    if (!grantSucceeded(msg)) {
+      // Terminal. Said plainly because the symptom otherwise is a link that
+      // 403s for the person it was addressed to, with nothing in the logs
+      // connecting the two.
+      console.warn('applyOwnerGrant GAVE UP', employeeRef, plan.requestBody.emailAddress,
+                   '- not a Google account; only a public link can reach them:', msg);
     }
   }
   await db.markFolderGranted(tenantId, employeeRef);

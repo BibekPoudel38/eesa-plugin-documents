@@ -110,8 +110,15 @@
   .row{align-items:center;padding:9px 10px;border-radius:9px;
        border-bottom:1px solid var(--line)}
   .row:hover{background:var(--soft)}
-  .name{display:flex;align-items:center;gap:11px;min-width:0}
-  .name b{font-weight:550;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .name{display:flex;align-items:center;gap:11px;min-width:0;overflow:hidden}
+  /* The icon keeps its size; only the title gives way. */
+  .name>:first-child{flex:none}
+  .name>div{min-width:0;flex:1 1 auto}
+  /* display:block matters more than it looks: text-overflow does nothing on an
+     inline box, so as a plain <b> a long filename never truncated — it just
+     kept drawing straight over the Folder and Size columns. */
+  .name b{display:block;font-weight:550;font-size:13.5px;
+          overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .where,.when{color:var(--mut);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .acts{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
   .acts a,.acts button{color:var(--mut);font-size:12.5px;text-decoration:none;
