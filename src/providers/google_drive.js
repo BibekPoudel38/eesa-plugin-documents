@@ -341,7 +341,20 @@ export function viewUrlFor(fileId) {
   return fileId ? `https://drive.google.com/file/d/${fileId}/view` : '';
 }
 
-/** Publish: anyone with the link may read. Returns the shareable URLs.
+// What "public" grants. 'writer' means anyone holding the link may CHANGE the
+// file, not merely read it — no Google account required, no further check, and
+// the link travels wherever it is forwarded. It is set deliberately: the drive
+// belongs to one Gmail account while the Eesa logins are not Google accounts at
+// all, so a per-person grant cannot reach anybody, and read-only links left
+// members unable to work on their own documents.
+//
+// Two consequences worth keeping in view. An editor can alter contents, so the
+// indexed text in Qdrant can drift from what the file now says until the next
+// sync. And a link that leaks is an edit surface, not just a disclosure. One
+// word here reverts it to 'reader'.
+export const PUBLIC_ROLE = 'writer';
+
+/** Publish: anyone with the link may read AND edit. Returns the shareable URLs.
  *  Idempotent — Drive answers with an error we treat as success when the
  *  permission is already there, so re-sharing is not a failure. */
 export async function makePublic(tenantId, fileId) {
@@ -350,7 +363,7 @@ export async function makePublic(tenantId, fileId) {
   try {
     await drive.permissions.create({
       fileId,
-      requestBody: { role: 'reader', type: 'anyone' },
+      requestBody: { role: PUBLIC_ROLE, type: 'anyone' },
       // Without this the call succeeds and the link still 403s for anyone who
       // is not signed into the workspace.
       supportsAllDrives: true,

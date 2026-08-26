@@ -11,7 +11,7 @@
 // is skipped, what role they get, and that Google does not email them.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ownerGrantPlan, grantSettled, grantSucceeded } from '../src/providers/google_drive.js';
+import { ownerGrantPlan, grantSettled, grantSucceeded, PUBLIC_ROLE } from '../src/providers/google_drive.js';
 
 const FOLDER = '1AbCdEfGhIjKlMnOpQrStUvWxYz';
 
@@ -91,4 +91,22 @@ test('a transient failure IS retried', () => {
     assert.equal(grantSettled(m), false, `stopped retrying on: ${m}`);
     assert.equal(grantSucceeded(m), false);
   }
+});
+
+test('a public link grants EDIT, deliberately', () => {
+  // Set on purpose, not by drift. The drive belongs to one Gmail account while
+  // the Eesa logins are not Google accounts, so no per-person grant can reach
+  // anybody and a read-only link left members unable to work on their own
+  // files. The cost is real and should stay visible in a test: anyone holding
+  // the link can CHANGE the file, with no account and no further check.
+  assert.equal(PUBLIC_ROLE, 'writer');
+});
+
+test('the per-member folder grant stays read-only', () => {
+  // Different decision from the public link, and it must not follow it: the
+  // folder grant is per-person, so read is enough to open what is theirs,
+  // while adding and removing files stays with the plugin and the index.
+  assert.equal(
+    ownerGrantPlan({ email: 'a@b.com', folderId: 'F1' }).requestBody.role,
+    'reader');
 });
