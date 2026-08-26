@@ -229,6 +229,20 @@ async function applyOwnerGrant(tenantId, drive, employeeRef, plan) {
  *  Named by email so a human can find it in Drive; the PERMISSION is keyed on
  *  employeeRef in member_folders, so renaming a mailbox cannot hand someone
  *  else's documents to a new address. */
+/** Should this member's folder be renamed to their address?
+ *
+ *  Only when we never knew one. A folder created from a token with no email
+ *  claim is named after the numeric employeeRef ("36"), which is unidentifiable
+ *  in Drive and shows up in the admin roster as a person called "36".
+ *
+ *  Narrow on purpose: a folder that already carries an address is left alone,
+ *  so somebody who renamed theirs deliberately is not overruled on their next
+ *  upload.
+ */
+export function shouldRenameMemberFolder({ email, knownEmail } = {}) {
+  return !!email && !String(knownEmail || '').trim();
+}
+
 export async function ensureMemberFolder(tenantId, { employeeRef, email }) {
   // Reuse the mapping first. Naming is not a stable key: the downstream token
   // carries no email, so a call from the upload path would fall back to the
@@ -247,6 +261,33 @@ export async function ensureMemberFolder(tenantId, { employeeRef, email }) {
     if (plan) {
       const drive = await driveFor(tenantId);
       if (drive) await applyOwnerGrant(tenantId, drive, employeeRef, plan);
+    }
+    // Name backfill. The folder is named from `email || employeeRef`, so a
+    // token that arrived without an email claim created a folder called "36".
+    // Nothing is mis-scoped by that — the permission is keyed on employee_ref,
+    // not the name — but the folder is then unidentifiable in Drive, and the
+    // admin roster lists that person as "36" with no way to tell who they are.
+    //
+    // Deliberately narrow: only when we never knew an address. A folder that
+    // already has one is left alone, so somebody who renamed theirs on purpose
+    // does not get overruled on the next upload.
+    if (shouldRenameMemberFolder({ email, knownEmail: known.email })) {
+      try {
+        const drive = await driveFor(tenantId);
+        if (drive) {
+          await drive.files.update({
+            fileId: known.folder_id,
+            requestBody: { name: String(email).slice(0, 300) },
+            supportsAllDrives: true,
+          });
+        }
+        await db.upsertMemberFolder(tenantId, {
+          employeeRef, email, folderId: known.folder_id,
+        });
+      } catch (e) {
+        // Never fatal: a folder with an unhelpful name still works.
+        console.warn('member folder rename:', employeeRef, String(e?.message || e));
+      }
     }
     return known.folder_id;
   }

@@ -74,3 +74,19 @@ export function requestedScope(raw, { master = false, mine = '' } = {}) {
   if (mine && want === mine) return want;
   return null;
 }
+
+/** Should an upload be published (anyone with the link may open it)?
+ *
+ *  Default TRUE. It used to require an explicit public=true and only the
+ *  chat-filing path ever sent it, so a file uploaded from the app's own Upload
+ *  button got a Drive link that opened for nobody. Where the workspace logins
+ *  are not Google accounts there is no per-person grant to fall back on, so an
+ *  unpublished file is one its own uploader cannot open.
+ *
+ *  Only the literal string "false" opts out. Anything else — absent, empty,
+ *  "true", junk — publishes, because the failure mode of guessing wrong the
+ *  other way is a link that silently does not work.
+ */
+export function publishOnUpload(raw) {
+  return String(raw ?? 'true').trim().toLowerCase() !== 'false';
+}

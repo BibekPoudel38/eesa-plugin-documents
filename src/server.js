@@ -16,7 +16,7 @@ import { getProvider, listProviders, isSupported } from './providers/index.js';
 import { handleRpc } from './mcp.js';
 // esc/page/state live in web.js so they can be unit tested: this module calls
 // app.listen() at import, so nothing defined here is reachable from a test.
-import { esc, page, makeState, readState, requestedScope } from './web.js';
+import { esc, page, makeState, readState, requestedScope, publishOnUpload } from './web.js';
 import { embedQuery, warm } from './embed.js';
 import { search, ping as qdrantPing, deleteDocument as qdrantDelete } from './qdrant.js';
 
@@ -652,10 +652,19 @@ app.post('/api/upload', reader(), upload.single('file'), async (req, res) => {
     });
     const indexed = await pipeline.indexUploaded(req.ctx.tenantId, providerKey, uploaded);
 
-    // Publish on upload, when asked. Same permission as sharing an existing
-    // file, checked the same way.
+    // Publish on upload, by DEFAULT. Send public=false to opt out.
+    //
+    // It used to require an explicit public=true, and only the chat-filing path
+    // ever sent it — so a file uploaded from this app's own Upload button got a
+    // Drive link that opened for nobody. In a workspace whose logins are not
+    // Google accounts there is no per-person grant to fall back on, so an
+    // unpublished file is one the person who uploaded it cannot open. Every
+    // upload route defaulting to the same thing beats each caller remembering.
+    //
+    // Same permission check as sharing an existing file, checked the same way.
     let publicLinks = null;
-    if (String(req.body.public || '') === 'true' && indexed?.id) {
+    const wantPublic = publishOnUpload(req.body.public);
+    if (wantPublic && indexed?.id) {
       const email = req.ctx.raw?.email || req.ctx.email || '';
       const master = await db.isMasterAdmin(req.ctx.tenantId, req.ctx.sub, email);
       if (master || await db.canUpload(req.ctx.tenantId, req.ctx.sub)) {
