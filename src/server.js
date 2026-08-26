@@ -49,12 +49,30 @@ app.use((req, res, next) => {
 // container keeps serving throughout — which is the entire point, because the
 // migration is additive and the old code is happy against the new schema.
 let SCHEMA_READY = false;
+// Which build is actually running. Coolify exposes the deployed commit under
+// one of a few names depending on version and build pack, so try them in turn
+// rather than pin one and report 'unknown' forever.
+//
+// This exists because "did that deploy land?" kept being unanswerable. A change
+// confined to server-side code alters nothing observable — same routes, same
+// bytes on /app — so a redeploy that silently did not happen looked exactly
+// like one that did, and the only way to tell was to exercise the behaviour and
+// infer backwards. Twice that cost a debugging round chasing a bug that was
+// simply not deployed yet.
+const BUILD_SHA = (
+  process.env.SOURCE_COMMIT
+  || process.env.COOLIFY_GIT_COMMIT_SHA
+  || process.env.GIT_COMMIT_SHA
+  || process.env.GIT_SHA
+  || ''
+).slice(0, 12) || 'unknown';
+
 app.get('/health', (req, res) => {
   if (!SCHEMA_READY) {
     return res.status(503).json({ ok: false, plugin: MANIFEST.slug, ready: false,
-                                  reason: 'applying schema' });
+                                  reason: 'applying schema', build: BUILD_SHA });
   }
-  res.json({ ok: true, plugin: MANIFEST.slug, ready: true });
+  res.json({ ok: true, plugin: MANIFEST.slug, ready: true, build: BUILD_SHA });
 });
 
 // The Eesa launcher probes this to decide whether to show the app to a user,
