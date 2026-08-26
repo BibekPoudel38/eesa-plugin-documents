@@ -869,7 +869,19 @@ async function boot() {
 boot();
 // Slow poll: enough to show indexing finishing, not so much that a phone on
 // mobile data pays for it.
-setInterval(() => { if (TOKEN && VIEW === 'files') { loadFiles(); refreshStatus(); } }, 12000);
+//
+// Skipped while the tab is hidden. This runs inside a dashboard iframe people
+// leave open all day behind other tabs, where it was two requests every twelve
+// seconds — for a screen nobody was looking at, against a plugin that embeds
+// and searches for a living. Refresh on the way back so returning to the tab
+// still shows current state rather than whatever it held when it was hidden.
+setInterval(() => {
+  if (document.hidden) return;
+  if (TOKEN && VIEW === 'files') { loadFiles(); refreshStatus(); }
+}, 12000);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && TOKEN && VIEW === 'files') { loadFiles(); refreshStatus(); }
+});
 </script>
 </body>
 </html>
