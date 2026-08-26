@@ -3,6 +3,7 @@
 //   /api/*      REST (token; OAuth callback is open) → connect / upload / search
 //   GET  /app   embedded admin UI (surface="ui")     → connect + upload + status
 import express from 'express';
+import { shouldRenameMemberFolder } from './providers/google_drive.js';
 import { randomUUID } from 'node:crypto';
 import multer from 'multer';
 import { readFileSync } from 'fs';
@@ -293,11 +294,17 @@ async function ensureFolderForCaller(ctx, role) {
     if (!conn) return;                       // nothing to create it in yet
     const email = ctx.raw?.email || ctx.email || '';
     const existing = await db.getMemberFolder(ctx.tenantId, ctx.sub);
-    // A folder they can already open: nothing to do. A folder they CANNOT —
-    // every one made before members were granted access — is repaired here
-    // rather than on their next upload, so the dead links they were already
-    // sent start working as soon as they open Documents.
-    if (existing && (existing.owner_granted || !email)) return;
+    if (existing) {
+      // Return early only when there is genuinely nothing to repair. Two
+      // separate repairs live in ensureMemberFolder and they do NOT share a
+      // condition: gating both on the grant meant a folder whose grant had
+      // already been settled — including one that gave up because the address
+      // is not a Google account — never got its NAME fixed either. That is how
+      // "36" stayed "36" through a deploy that was supposed to rename it.
+      const needsGrant = !!email && !existing.owner_granted;
+      const needsName = shouldRenameMemberFolder({ email, knownEmail: existing.email });
+      if (!needsGrant && !needsName) return;
+    }
     const gd = getProvider('google_drive');
     if (!existing) await gd.ensureSharedFolder(ctx.tenantId);
     await gd.ensureMemberFolder(ctx.tenantId, { employeeRef: ctx.sub, email });

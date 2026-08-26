@@ -428,7 +428,12 @@ export async function listMembersWithFolders(tenantId) {
        full outer join member_folders f
          on f.tenant_id = m.tenant_id and f.employee_ref = m.employee_ref
       where coalesce(m.tenant_id, f.tenant_id) = $1
-      order by coalesce(m.created_at, f.created_at) asc`, [tenantId]);
+        -- The shared folder is stored in member_folders under a sentinel ref so
+        -- the scope map has one shape. It is not a person, and the FULL OUTER
+        -- JOIN above would otherwise list it in the admin roster as a member
+        -- called "__shared__" with switches next to it.
+        and coalesce(m.employee_ref, f.employee_ref) <> $2
+      order by coalesce(m.created_at, f.created_at) asc`, [tenantId, SHARED_REF]);
 }
 
 /** Is this caller a master admin — every folder, every file, edit rights?
