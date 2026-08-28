@@ -24,7 +24,29 @@ import { search, ping as qdrantPing, deleteDocument as qdrantDelete } from './qd
 const gdrive = () => getProvider('google_drive');
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const MANIFEST = JSON.parse(readFileSync(join(__dirname, '..', 'manifest.json'), 'utf-8'));
+// The manifest ships with a hostname baked into every surface URL, which made
+// moving the plugin to a new domain a code change and a redeploy — for a fact
+// the running process already knows. PLUGIN_BASE_URL rewrites them at load, so
+// the same image serves whatever hostname it is deployed behind and the
+// manifest Eesa registers from is always the one that answers.
+//
+// Absent, it keeps the file verbatim: existing deployments are unaffected.
+const MANIFEST = (() => {
+  const m = JSON.parse(readFileSync(join(__dirname, '..', 'manifest.json'), 'utf-8'));
+  const base = (process.env.PLUGIN_BASE_URL || '').trim().replace(/\/+$/, '');
+  if (!base) return m;
+  // Swap only the origin, so the paths (/mcp, /app, /api) stay whatever the
+  // manifest says they are.
+  const rehost = (u) => {
+    if (typeof u !== 'string' || !u) return u;
+    try { return base + new URL(u).pathname; } catch { return u; }
+  };
+  for (const s of Object.values(m.surfaces || {})) {
+    if (s.endpoint) s.endpoint = rehost(s.endpoint);
+    if (s.url) s.url = rehost(s.url);
+  }
+  return m;
+})();
 const serverInfo = { name: MANIFEST.slug, version: MANIFEST.version };
 const MAX_BYTES = Number(process.env.INGEST_MAX_FILE_MB || 25) * 1024 * 1024;
 
