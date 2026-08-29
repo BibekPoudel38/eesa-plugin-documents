@@ -495,15 +495,36 @@ export async function syncMasterAdminsFromEnv() {
 }
 
 export async function setMemberPermissions(tenantId, employeeRef, { canRead, canUpload }) {
+  // INSERT ... ON CONFLICT, not UPDATE. listMembersWithFolders explains why a
+  // few lines up: members and member_folders are written by different events
+  // and either can exist alone — a folder row appears the first time somebody
+  // USES Documents, a member row only when somebody is provisioned. The roster
+  // was taught to full-outer-join for exactly that reason; this was not, so it
+  // matched no row and the route above turned that into 404 "no such member".
+  //
+  // The effect was that the admin screen's read/upload switches silently
+  // failed for precisely the people who had actually used the feature. On this
+  // workspace that was two of the four listed members, both of whom had
+  // uploaded files.
+  //
+  // Defaults on insert are the same permissive ones the readers assume
+  // (`can_upload !== false`), so materialising a row here changes nobody's
+  // access — it only makes the row addressable.
   const rows = await q(
-    `update members
-        set can_read   = coalesce($3, can_read),
-            can_upload = coalesce($4, can_upload)
-      where tenant_id = $1 and employee_ref = $2
+    `insert into members (tenant_id, employee_ref, role, name, email, active,
+                          can_read, can_upload)
+     values ($1, $2, $5, '',
+             coalesce((select email from member_folders
+                        where tenant_id = $1 and employee_ref = $2), ''),
+             true, coalesce($3, true), coalesce($4, true))
+     on conflict (tenant_id, employee_ref) do update
+        set can_read   = coalesce($3, members.can_read),
+            can_upload = coalesce($4, members.can_upload)
       returning employee_ref, can_read, can_upload`,
     [tenantId, employeeRef,
      canRead === undefined ? null : !!canRead,
-     canUpload === undefined ? null : !!canUpload]);
+     canUpload === undefined ? null : !!canUpload,
+     DEFAULT_ROLE]);
   return rows[0] || null;
 }
 
