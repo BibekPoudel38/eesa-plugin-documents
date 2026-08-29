@@ -111,3 +111,48 @@ test('an empty tenant id is refused rather than collapsing to a shared name', ()
   assert.throws(() => collectionFor(null));
   assert.throws(() => collectionFor('///'));
 });
+
+// ---------------------------------------------------------------------------
+// What a member's folder is called
+// ---------------------------------------------------------------------------
+// It used to be `email || employeeRef`, so a token carrying no email claim
+// produced a folder called "36" — unidentifiable in Drive, and listed as "36"
+// in the admin roster with no way to tell whose it was.
+import { memberFolderName } from '../src/providers/google_drive.js';
+
+test('the name and the ref both appear', () => {
+  assert.equal(
+    memberFolderName({ employeeRef: '39', name: 'Jeeva Kumar', email: 'j@x.com' }),
+    'Jeeva Kumar (39)');
+});
+
+test('the email stands in when there is no name', () => {
+  assert.equal(
+    memberFolderName({ employeeRef: '39', email: 'jeeva@chupy.com' }),
+    'jeeva@chupy.com (39)');
+});
+
+test('the ref alone is still better than nothing', () => {
+  assert.equal(memberFolderName({ employeeRef: '39' }), '39');
+  assert.equal(memberFolderName({ employeeRef: 39 }), '39');
+});
+
+test('blank human parts do not leave dangling punctuation', () => {
+  assert.equal(memberFolderName({ employeeRef: '39', name: '   ', email: '' }), '39');
+});
+
+test('the ref is always present, because it is the only stable key', () => {
+  const out = memberFolderName({ employeeRef: '39', name: 'Jeeva' });
+  assert.match(out, /39/, 'a folder with no ref cannot be matched back to a person');
+});
+
+test('a missing ref does not produce the string "undefined"', () => {
+  assert.equal(memberFolderName({ name: 'Jeeva' }), 'Jeeva');
+  assert.equal(memberFolderName({}), '');
+  assert.equal(memberFolderName(), '');
+});
+
+test('a very long name cannot overflow the Drive name limit', () => {
+  const out = memberFolderName({ employeeRef: '39', name: 'x'.repeat(500) });
+  assert.ok(out.length <= 300, `got ${out.length}`);
+});

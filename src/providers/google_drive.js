@@ -239,11 +239,29 @@ async function applyOwnerGrant(tenantId, drive, employeeRef, plan) {
  *  so somebody who renamed theirs deliberately is not overruled on their next
  *  upload.
  */
+/** What a member's folder is called in Drive.
+ *
+ * Was `email || employeeRef`, which produced a folder called "36" whenever the
+ * token carried no email claim — unidentifiable in Drive, and listed as "36"
+ * in the admin roster with no way to tell who it belonged to.
+ *
+ * The ref is always present and is the only stable key, so it always appears;
+ * the human part is whichever of name or email we actually know. Nothing here
+ * decides access — permission is keyed on employee_ref, never on the name — so
+ * this is purely about a person being able to find their own folder.
+ */
+export function memberFolderName({ employeeRef, email = '', name = '' } = {}) {
+  const ref = String(employeeRef ?? '').trim();
+  const human = String(name || '').trim() || String(email || '').trim();
+  if (!ref) return human.slice(0, 300);
+  return (human ? `${human} (${ref})` : ref).slice(0, 300);
+}
+
 export function shouldRenameMemberFolder({ email, knownEmail } = {}) {
   return !!email && !String(knownEmail || '').trim();
 }
 
-export async function ensureMemberFolder(tenantId, { employeeRef, email }) {
+export async function ensureMemberFolder(tenantId, { employeeRef, email, name = '' }) {
   // Reuse the mapping first. Naming is not a stable key: the downstream token
   // carries no email, so a call from the upload path would fall back to the
   // employeeRef, not find the folder named after the address, and create a
@@ -277,7 +295,7 @@ export async function ensureMemberFolder(tenantId, { employeeRef, email }) {
         if (drive) {
           await drive.files.update({
             fileId: known.folder_id,
-            requestBody: { name: String(email).slice(0, 300) },
+            requestBody: { name: memberFolderName({ employeeRef, email, name }) },
             supportsAllDrives: true,
           });
         }
@@ -296,7 +314,8 @@ export async function ensureMemberFolder(tenantId, { employeeRef, email }) {
   const root = await ensureFolder(tenantId);
   if (!drive || !root) return null;
   const membersId = await ensureSubfolder(drive, MEMBERS_NAME, root);
-  const folderId = await ensureSubfolder(drive, email || employeeRef, membersId);
+  const folderId = await ensureSubfolder(
+    drive, memberFolderName({ employeeRef, email, name }), membersId);
   await db.upsertMemberFolder(tenantId, { employeeRef, email: email || '', folderId });
   const plan = ownerGrantPlan({ email, folderId });
   if (plan) await applyOwnerGrant(tenantId, drive, employeeRef, plan);

@@ -419,7 +419,13 @@ app.post('/api/members', (req, res, next) => {
     if (conn) {
       const gd = getProvider('google_drive');
       await gd.ensureSharedFolder(tenantId);
-      folderId = await gd.ensureMemberFolder(tenantId, { employeeRef, email: String(req.body?.email || '') });
+      // The name travels too: a folder called "39" is unidentifiable in Drive
+      // and unhelpful in the roster. Eesa sends it with the grant.
+      folderId = await gd.ensureMemberFolder(tenantId, {
+        employeeRef,
+        email: String(req.body?.email || ''),
+        name: String(req.body?.name || ''),
+      });
     }
   } catch (e) {
     console.warn('member folder provisioning:', e.message);
