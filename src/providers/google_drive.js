@@ -490,3 +490,52 @@ export async function trashFile(tenantId, fileId) {
   });
   return { fileId, trashed: true };
 }
+
+// ---- Shared group folders --------------------------------------------------
+const GROUPS_NAME = 'groups';
+
+/** The Drive name for a group folder. The id suffix keeps two groups with the
+ *  same name from converging on one Drive folder — ensureSubfolder finds by
+ *  name, and "Rules" is a name two admins will both pick. */
+export function groupFolderName(name, groupId) {
+  const clean = String(name || '').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
+  return (clean || 'Group') + ' (' + String(groupId || '').slice(0, 8) + ')';
+}
+
+/** <root>/groups/<name (id)>. Created on first use and remembered on the group
+ *  row, the way member folders are remembered, so an upload is not a Drive
+ *  lookup every time. */
+export async function ensureGroupFolder(tenantId, { groupId, name, knownFolderId = '' }) {
+  if (knownFolderId) return knownFolderId;
+  const drive = await driveFor(tenantId);
+  const root = await ensureFolder(tenantId);
+  if (!drive || !root) return null;
+  const groupsId = await ensureSubfolder(drive, GROUPS_NAME, root);
+  const folderId = await ensureSubfolder(drive, groupFolderName(name, groupId), groupsId);
+  await db.setGroupFolderId(tenantId, groupId, folderId);
+  return folderId;
+}
+
+export async function renameFolder(tenantId, folderId, name) {
+  const drive = await driveFor(tenantId);
+  if (!drive || !folderId) return;
+  await drive.files.update({ fileId: folderId, requestBody: { name }, supportsAllDrives: true });
+}
+
+/** Move a file so that `toId` is its only parent. Drive allows several
+ *  parents; "move" here means it stops being in the old folder, otherwise it
+ *  would keep answering for the old scope too. */
+export async function moveFile(tenantId, fileId, toId) {
+  const drive = await driveFor(tenantId);
+  if (!drive) throw new Error('Google Drive is not connected.');
+  const cur = await drive.files.get({ fileId, fields: 'id,parents', supportsAllDrives: true });
+  const old = (cur.data.parents || []).filter((p) => p !== toId);
+  const res = await drive.files.update({
+    fileId,
+    addParents: toId,
+    removeParents: old.length ? old.join(',') : undefined,
+    fields: 'id,name,mimeType,webViewLink,size,md5Checksum,parents',
+    supportsAllDrives: true,
+  });
+  return normalize(res.data);
+}

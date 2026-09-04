@@ -170,3 +170,39 @@ alter table documents add column if not exists shared_at  timestamptz;
 -- So it is an explicit flag, defaulting FALSE, granted deliberately — seeded
 -- from DOCUMENTS_MASTER_ADMINS at boot and visible in the roster.
 alter table members add column if not exists is_master boolean not null default false;
+
+
+-- Shared group folders.
+--
+-- A third kind of scope beside `shared` (everyone) and `member:<ref>` (one
+-- person): `group:<id>` — a named folder a Documents admin creates and adds
+-- people to. Members read and upload there; nobody else sees it, including
+-- admins who are not in it, unless they are a master admin, who sees every
+-- folder by definition. The Drive folder lives under <root>/groups/<name>, and
+-- folder_id is the one fact the indexer needs to turn "this file sits in that
+-- folder" into "readable by these people".
+--
+-- Archived rather than deleted: the files stay in Drive, and the scope stays
+-- on the rows so un-archiving restores exactly who could read what.
+create table if not exists folder_groups (
+    id           uuid primary key default gen_random_uuid(),
+    tenant_id    text not null,
+    name         text not null,
+    folder_id    text not null default '',
+    created_by   text not null default '',
+    archived     boolean not null default false,
+    created_at   timestamptz not null default now(),
+    updated_at   timestamptz not null default now()
+);
+create index if not exists folder_groups_tenant_idx on folder_groups (tenant_id);
+create unique index if not exists folder_groups_folder_uq
+    on folder_groups (tenant_id, folder_id) where folder_id <> '';
+
+create table if not exists folder_group_members (
+    group_id     uuid not null references folder_groups (id) on delete cascade,
+    employee_ref text not null,
+    added_by     text not null default '',
+    added_at     timestamptz not null default now(),
+    primary key (group_id, employee_ref)
+);
+create index if not exists folder_group_members_ref_idx on folder_group_members (employee_ref);

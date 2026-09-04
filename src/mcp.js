@@ -12,7 +12,7 @@ const TOOLS = [
   {
     name: 'search_documents',
     description:
-      'Find the most relevant documents by MEANING (semantic search over content), not just filename. Use for "find the doc about X", "which file mentions Y". Returns titles, matching passages, and links.',
+      'Find the most relevant documents by MEANING (semantic search over content), not just filename. Use for "find the doc about X", "which file mentions Y". Searches every folder the caller can read: their own, Shared, and each shared group folder they are in. Returns titles, matching passages, links, and the folder each hit came from — say which folder an answer is based on.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -24,8 +24,16 @@ const TOOLS = [
   },
   {
     name: 'list_documents',
-    description: 'List the documents you can see (most recent first). Your own folder plus anything in Shared.',
+    description: 'List the documents you can see (most recent first): your own folder, Shared, and the shared group folders you are in. Each carries the folder it is in.',
     inputSchema: { type: 'object', properties: { limit: { type: 'integer' } } },
+  },
+  {
+    name: 'list_shared_folders',
+    description:
+      'List the shared group folders the caller belongs to (a Documents admin sees every folder): '
+      + 'name, how many people are in it, how many files. Use for "which folders am I in", '
+      + '"who can see the restaurant rules", or before filing a document into a folder.',
+    inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'get_document_link',
@@ -107,6 +115,7 @@ async function runTool(name, args, ctx) {
     // it would let a question ask for someone else's folder.
     const scopes = await callerScopes(ctx);
     const hits = await search(ctx.tenantId, vec, Math.min(Number(args.limit) || 6, 20), scopes);
+    const labels = await db.scopeLabels(ctx.tenantId, hits.map((h) => h.scope), { youRef: ctx.sub });
     return {
       results: hits.map((h) => ({
         title: h.title,
@@ -115,6 +124,7 @@ async function runTool(name, args, ctx) {
         downloadUrl: gd().downloadUrlFor(h.fileId),
         snippet: (h.snippet || '').slice(0, 400),
         score: Number((h.score ?? 0).toFixed(3)),
+        folder: labels[h.scope] || '',
       })),
       note: hits.length ? undefined : 'No matching documents were found.',
     };
@@ -127,14 +137,28 @@ async function runTool(name, args, ctx) {
     const docs = await db.listDocuments(ctx.tenantId, {
       limit: Math.min(Number(args.limit) || 30, 200), scopes,
     });
+    const labels = await db.scopeLabels(ctx.tenantId, docs.map((d) => d.scope), { youRef: ctx.sub });
     return {
       documents: docs.filter((d) => d.state === 'indexed').map((d) => ({
         title: d.title,
+        folder: labels[d.scope] || '',
         link: d.link,
         downloadUrl: gd().downloadUrlFor(d.fileId),
         public: !!d.publicUrl,
         indexedAt: d.indexedAt,
       })),
+    };
+  }
+  if (name === 'list_shared_folders') {
+    const master = await db.isMasterAdmin(ctx.tenantId, ctx.sub, ctx.email || '');
+    const admin = master || ctx.role_ === 'admin';
+    const groups = await db.listGroups(ctx.tenantId, { forRef: admin ? null : ctx.sub });
+    return {
+      folders: groups.map((g) => ({
+        id: g.id, name: g.name, members: g.members.length, files: g.docCount,
+        youAreIn: g.members.includes(ctx.sub),
+      })),
+      note: groups.length ? undefined : 'No shared group folders yet.',
     };
   }
   if (name === 'get_document_link') {

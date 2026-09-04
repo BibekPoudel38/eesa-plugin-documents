@@ -237,6 +237,7 @@ export async function search(tenantId, vector, limit = 6, scopes = null) {
       link: r.payload.link,
       fileId: r.payload.file_id || fileIdFromLink(r.payload.link),
       snippet: r.payload.text,
+      scope: r.payload.scope || '',
     });
     if (out.length >= limit) break;
   }

@@ -395,7 +395,11 @@ export async function readableScopes(tenantId, employeeRef) {
   // (readable). A missing row must not read as "revoked" or the first request
   // after a grant would fail confusingly.
   if (rows[0] && rows[0].can_read === false) return [];
-  return scopesFor(ref);
+  // Plus every shared group folder the caller is in. Groups are part of the
+  // READABLE set, not of scopesFor(): a revoked reader loses them too, and the
+  // callers that want only "own + Shared" (mineScope, upload defaults) keep
+  // getting exactly that.
+  return [...scopesFor(ref), ...await groupScopesFor(tenantId, ref)];
 }
 
 export async function canUpload(tenantId, employeeRef) {
@@ -570,7 +574,15 @@ export async function scopeForFolder(tenantId, folderId, sharedFolderId) {
     [tenantId, folderId],
   );
   const ref = rows[0]?.employee_ref;
-  if (!ref) return '';
+  if (!ref) {
+    // Not a person's folder: is it a group's? Same table shape as members —
+    // one Drive folder id, one scope — so a file dropped into the group folder
+    // in Drive itself, never through the app, still answers for the members.
+    const g = await q(
+      `select id from folder_groups where tenant_id = $1 and folder_id = $2 and folder_id <> ''`,
+      [tenantId, folderId]);
+    return g[0]?.id ? groupScope(g[0].id) : '';
+  }
   // The Shared folder is stored in this same table under a sentinel ref so
   // there is one folder->scope map rather than two. Without this line it would
   // resolve to `member:__shared__` — a scope nobody holds — and the shared
@@ -648,4 +660,176 @@ export async function claimSetupLink(token) {
     [token],
   );
   return rows[0] || null;
+}
+
+
+// ---------------------------------------------------------------------------
+// Shared group folders — scope `group:<id>`.
+//
+// Created by a Documents admin, read and written by its members. Everything
+// that decides visibility (readableScopes, scopeForFolder) already runs
+// through the scope list, so a group is one more entry there rather than a
+// second permission system.
+// ---------------------------------------------------------------------------
+const GROUP_PREFIX = 'group:';
+const UUID_RE = /^[0-9a-f-]{36}$/i;
+
+export const groupScope = (id) => GROUP_PREFIX + String(id);
+export const isGroupScope = (s) => String(s || '').startsWith(GROUP_PREFIX);
+export const groupIdFromScope = (s) =>
+  (isGroupScope(s) && UUID_RE.test(String(s).slice(GROUP_PREFIX.length)))
+    ? String(s).slice(GROUP_PREFIX.length) : '';
+
+const groupOut = (g) => g && {
+  id: String(g.id),
+  name: g.name,
+  scope: groupScope(g.id),
+  folderId: g.folder_id || '',
+  createdBy: g.created_by || '',
+  archived: g.archived === true,
+  members: Array.isArray(g.members) ? g.members.filter(Boolean) : [],
+  docCount: Number(g.doc_count || 0),
+  createdAt: iso(g.created_at),
+  updatedAt: iso(g.updated_at),
+};
+
+// One shape for every read: the row, its members, and how much is in it.
+const GROUP_SELECT = `
+  select g.*,
+         coalesce((select array_agg(m.employee_ref order by m.added_at)
+                     from folder_group_members m where m.group_id = g.id), '{}') as members,
+         (select count(*) from documents d
+           where d.tenant_id = g.tenant_id and d.scope = 'group:' || g.id::text) as doc_count
+    from folder_groups g`;
+
+/** Groups in a tenant. `forRef` narrows to the ones that person is in — what a
+ *  staff member may see. null = every group (admin roster). */
+export async function listGroups(tenantId, { forRef = null, includeArchived = false } = {}) {
+  const rows = await q(
+    `${GROUP_SELECT}
+      where g.tenant_id = $1
+        and ($2::boolean or g.archived = false)
+        and ($3::text is null or exists (select 1 from folder_group_members m
+                                          where m.group_id = g.id and m.employee_ref = $3))
+      order by g.created_at asc`,
+    [tenantId, !!includeArchived, forRef == null ? null : String(forRef)]);
+  return rows.map(groupOut);
+}
+
+export async function getGroup(tenantId, id) {
+  if (!UUID_RE.test(String(id || ''))) return null;
+  const rows = await q(`${GROUP_SELECT} where g.tenant_id = $1 and g.id = $2`, [tenantId, id]);
+  return groupOut(rows[0]);
+}
+
+/** A group by id or by name (case-insensitive, substring). Name matches
+ *  prefer the exact name, then the most recent — "rules" should find
+ *  "Restaurant rules" and not fail on a partial. Archived groups never match. */
+export async function findGroup(tenantId, ref, { forRef = null } = {}) {
+  const r = String(ref || '').trim();
+  if (!r) return null;
+  const memberSql = forRef == null ? '' :
+    ` and exists (select 1 from folder_group_members m where m.group_id = g.id and m.employee_ref = $3)`;
+  const args = (v) => (forRef == null ? [tenantId, v] : [tenantId, v, String(forRef)]);
+  if (UUID_RE.test(r)) {
+    const byId = await q(`${GROUP_SELECT} where g.tenant_id = $1 and g.id = $2 and g.archived = false${memberSql}`, args(r));
+    if (byId[0]) return groupOut(byId[0]);
+  }
+  const rows = await q(
+    `${GROUP_SELECT}
+      where g.tenant_id = $1 and g.archived = false and g.name ilike $2${memberSql}
+      order by (lower(g.name) = lower(trim(both '%' from $2))) desc, g.updated_at desc
+      limit 1`,
+    args(`%${r}%`));
+  return groupOut(rows[0]);
+}
+
+export async function createGroup(tenantId, { name, createdBy = '' }) {
+  const rows = await q(
+    `insert into folder_groups (tenant_id, name, created_by) values ($1, $2, $3) returning *`,
+    [tenantId, String(name).trim().slice(0, 80), String(createdBy || '')]);
+  return getGroup(tenantId, rows[0].id);
+}
+
+export async function renameGroup(tenantId, id, name) {
+  await q(`update folder_groups set name = $3, updated_at = now() where tenant_id = $1 and id = $2`,
+          [tenantId, id, String(name).trim().slice(0, 80)]);
+  return getGroup(tenantId, id);
+}
+
+export async function setGroupFolderId(tenantId, id, folderId) {
+  await q(`update folder_groups set folder_id = $3, updated_at = now() where tenant_id = $1 and id = $2`,
+          [tenantId, id, folderId || '']);
+}
+
+export async function setGroupArchived(tenantId, id, archived) {
+  await q(`update folder_groups set archived = $3, updated_at = now() where tenant_id = $1 and id = $2`,
+          [tenantId, id, !!archived]);
+  return getGroup(tenantId, id);
+}
+
+/** Add people. Only refs with an active member row are added — a ref that is
+ *  not a Documents member cannot read anything anyway, and silently "adding"
+ *  them would leave an admin believing access was granted. Returns the refs
+ *  that were refused so the caller can say so. */
+export async function addGroupMembers(tenantId, id, refs, addedBy = '') {
+  const want = [...new Set((refs || []).map((r) => String(r || '').trim()).filter(Boolean))];
+  if (!want.length) return { added: [], unknown: [] };
+  const known = (await q(
+    `select employee_ref from members where tenant_id = $1 and active = true and employee_ref = any($2::text[])`,
+    [tenantId, want])).map((r) => r.employee_ref);
+  const unknown = want.filter((r) => !known.includes(r));
+  for (const ref of known) {
+    await q(
+      `insert into folder_group_members (group_id, employee_ref, added_by) values ($1, $2, $3)
+       on conflict do nothing`, [id, ref, String(addedBy || '')]);
+  }
+  if (known.length) await q(`update folder_groups set updated_at = now() where id = $1`, [id]);
+  return { added: known, unknown };
+}
+
+export async function removeGroupMembers(tenantId, id, refs) {
+  const want = (refs || []).map((r) => String(r || '').trim()).filter(Boolean);
+  if (!want.length) return 0;
+  const r = await q(
+    `delete from folder_group_members m using folder_groups g
+      where m.group_id = g.id and g.tenant_id = $1 and g.id = $2 and m.employee_ref = any($3::text[])`,
+    [tenantId, id, want]);
+  await q(`update folder_groups set updated_at = now() where id = $1`, [id]);
+  return r.length;
+}
+
+/** `group:<id>` for every active group `employeeRef` is in. */
+export async function groupScopesFor(tenantId, employeeRef) {
+  const ref = String(employeeRef || '').trim();
+  if (!ref) return [];
+  const rows = await q(
+    `select g.id from folder_groups g
+       join folder_group_members m on m.group_id = g.id
+      where g.tenant_id = $1 and g.archived = false and m.employee_ref = $2`,
+    [tenantId, ref]);
+  return rows.map((r) => groupScope(r.id));
+}
+
+/** Human names for scopes, for "this answer came from <folder>". Unknown or
+ *  empty scopes label as '' rather than throwing — a label is decoration. */
+export async function scopeLabels(tenantId, scopes, { youRef = '' } = {}) {
+  const out = {};
+  const ids = [];
+  for (const s of new Set((scopes || []).filter(Boolean))) {
+    if (s === 'shared') out[s] = 'Shared';
+    else if (s.startsWith('member:')) out[s] = (youRef && s === 'member:' + youRef) ? 'My folder' : 'Personal folder';
+    else if (groupIdFromScope(s)) ids.push(groupIdFromScope(s));
+    else out[s] = '';
+  }
+  if (ids.length) {
+    const rows = await q(`select id, name from folder_groups where tenant_id = $1 and id = any($2::uuid[])`,
+                         [tenantId, ids]);
+    for (const r of rows) out[groupScope(r.id)] = r.name;
+  }
+  return out;
+}
+
+export async function setDocumentFolder(documentId, folderId) {
+  await q(`update documents set folder = $2, updated_at = now() where id = $1`, [documentId, folderId || '']);
 }

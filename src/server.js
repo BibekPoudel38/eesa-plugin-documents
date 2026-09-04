@@ -483,6 +483,178 @@ app.patch('/api/members/:ref', admin(), async (req, res) => {
                                canUpload: out.can_upload !== false } });
 });
 
+// ---- Shared group folders --------------------------------------------------
+// Managed by Documents admins (create, rename, add and remove people, archive);
+// read and written by their members; searched for members only. Everyone else
+// gets "no such folder", the same answer as a folder that does not exist — a
+// folder you are not in is not yours to know about. Master admins see all.
+
+const NOT_FOUND_FOLDER = { ok: false, error: { code: 'NOT_FOUND', message: 'No such folder.' } };
+
+function groupJson(g, sub) {
+  return { ...g, member: g.members.includes(sub), memberCount: g.members.length };
+}
+
+/** The Drive folder a target string names — 'shared', 'group:<id>', or
+ *  anything else for the caller's own — as `{ folderId }`. Answers the
+ *  request itself and returns null when the target is a group the caller is
+ *  not in. `folderId` can still be null with no Drive connected; callers that
+ *  need one check. */
+async function folderForTarget(req, res, gd, rawTarget) {
+  const target = String(rawTarget || '').trim();
+  const { tenantId, sub } = req.ctx;
+  const email = req.ctx.raw?.email || req.ctx.email || '';
+  if (target.toLowerCase() === 'shared') {
+    return { folderId: await gd.ensureSharedFolder(tenantId) };
+  }
+  if (db.isGroupScope(target)) {
+    const g = await db.getGroup(tenantId, db.groupIdFromScope(target));
+    const master = g ? await db.isMasterAdmin(tenantId, sub, email) : false;
+    if (!g || g.archived || !(master || g.members.includes(sub))) {
+      res.status(404).json(NOT_FOUND_FOLDER);
+      return null;
+    }
+    const folderId = await gd.ensureGroupFolder(tenantId, {
+      groupId: g.id, name: g.name, knownFolderId: g.folderId,
+    });
+    return { folderId, group: g };
+  }
+  return { folderId: await gd.ensureMemberFolder(tenantId, { employeeRef: sub, email }) };
+}
+
+app.get('/api/groups', reader(), async (req, res) => {
+  const { tenantId, sub } = req.ctx;
+  const email = req.ctx.raw?.email || req.ctx.email || '';
+  const master = await db.isMasterAdmin(tenantId, sub, email);
+  const all = master || req.role === 'admin';
+  const includeArchived = all && String(req.query.archived || '') === 'true';
+  const groups = await db.listGroups(tenantId, { forRef: all ? null : sub, includeArchived });
+  res.json({ ok: true, canManage: all, data: groups.map((g) => groupJson(g, sub)) });
+});
+
+app.post('/api/groups', admin(), async (req, res) => {
+  const name = String(req.body?.name || '').trim();
+  if (!name) {
+    return res.status(400).json({ ok: false, error: { code: 'BAD_REQUEST', message: 'A folder needs a name.' } });
+  }
+  const members = Array.isArray(req.body?.members) ? req.body.members : [];
+  const g = await db.createGroup(req.ctx.tenantId, { name, createdBy: req.ctx.sub });
+  const { unknown } = await db.addGroupMembers(req.ctx.tenantId, g.id, members, req.ctx.sub);
+  // Make the Drive folder now rather than on first upload, so a file dropped
+  // into it from Drive itself is already scoped when the sync finds it.
+  try {
+    await gdrive().ensureGroupFolder(req.ctx.tenantId, { groupId: g.id, name: g.name });
+  } catch (e) {
+    console.warn('group folder create:', g.id, String(e?.message || e));
+  }
+  const fresh = await db.getGroup(req.ctx.tenantId, g.id);
+  res.status(201).json({ ok: true, data: groupJson(fresh, req.ctx.sub), unknown });
+});
+
+app.get('/api/groups/:id', reader(), async (req, res) => {
+  const { tenantId, sub } = req.ctx;
+  const g = await db.getGroup(tenantId, req.params.id);
+  const email = req.ctx.raw?.email || req.ctx.email || '';
+  const master = g ? await db.isMasterAdmin(tenantId, sub, email) : false;
+  const visible = g && !(g.archived && !master)
+    && (master || req.role === 'admin' || g.members.includes(sub));
+  if (!visible) return res.status(404).json(NOT_FOUND_FOLDER);
+  res.json({ ok: true, data: groupJson(g, sub) });
+});
+
+app.patch('/api/groups/:id', admin(), async (req, res) => {
+  const g = await db.getGroup(req.ctx.tenantId, req.params.id);
+  if (!g) return res.status(404).json(NOT_FOUND_FOLDER);
+  const body = req.body || {};
+  let unknown = [];
+  const newName = typeof body.name === 'string' ? body.name.trim() : '';
+  if (newName && newName !== g.name) {
+    await db.renameGroup(req.ctx.tenantId, g.id, newName);
+    if (g.folderId) {
+      try {
+        await gdrive().renameFolder(req.ctx.tenantId, g.folderId, gdrive().groupFolderName(newName, g.id));
+      } catch (e) {
+        console.warn('group folder rename:', g.id, String(e?.message || e));
+      }
+    }
+  }
+  if (Array.isArray(body.add) && body.add.length) {
+    ({ unknown } = await db.addGroupMembers(req.ctx.tenantId, g.id, body.add, req.ctx.sub));
+  }
+  if (Array.isArray(body.remove) && body.remove.length) {
+    await db.removeGroupMembers(req.ctx.tenantId, g.id, body.remove);
+  }
+  if (body.archived !== undefined) {
+    await db.setGroupArchived(req.ctx.tenantId, g.id, !!body.archived);
+  }
+  const fresh = await db.getGroup(req.ctx.tenantId, g.id);
+  res.json({ ok: true, data: groupJson(fresh, req.ctx.sub), unknown });
+});
+
+app.delete('/api/groups/:id', admin(), async (req, res) => {
+  const g = await db.getGroup(req.ctx.tenantId, req.params.id);
+  if (!g) return res.status(404).json(NOT_FOUND_FOLDER);
+  const fresh = await db.setGroupArchived(req.ctx.tenantId, g.id, true);
+  res.json({ ok: true, data: groupJson(fresh, req.ctx.sub) });
+});
+
+/** Like actionable(), for moving: the uploader and a master may, and so may
+ *  anyone in the group the file currently sits in — a shared folder's files
+ *  belong to the group, and "I cannot re-file what a colleague dropped here"
+ *  would make the folder read-only for everyone but one person. */
+async function movable(req, res) {
+  const { tenantId, sub } = req.ctx;
+  const email = req.ctx.raw?.email || req.ctx.email || '';
+  const master = await db.isMasterAdmin(tenantId, sub, email);
+  const held = master ? null : await db.readableScopes(tenantId, sub);
+  const doc = await db.getDocument(tenantId, req.params.id, held);
+  const mine = db.scopesFor(sub)[1] || '';
+  const owned = !!doc && !!mine && doc.scope === mine;
+  const inMyGroup = !!doc && db.isGroupScope(doc.scope) && Array.isArray(held) && held.includes(doc.scope);
+  if (!doc || !(master || owned || inMyGroup)) {
+    res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'No such document.' } });
+    return null;
+  }
+  return { doc, master, owned };
+}
+
+/** Move a document into another folder: 'mine' | 'shared' | 'group:<id>'.
+ *  A file's scope follows its folder, so this is how a file parked in
+ *  someone's own folder becomes a group's. Owner or master, like edit and
+ *  delete, and the target must be one the caller may upload into. Postgres
+ *  gets the new scope at once so listings are right immediately; the vectors
+ *  are re-stamped by the indexer moments later. */
+app.post('/api/documents/:id/move', reader(), async (req, res) => {
+  const found = await movable(req, res);
+  if (!found) return;
+  if (!found.master && !(await db.canUpload(req.ctx.tenantId, req.ctx.sub))) {
+    return res.status(403).json({ ok: false, error: {
+      code: 'FORBIDDEN', message: 'An admin has turned off uploading for you.' } });
+  }
+  const gd = gdrive();
+  const landed = await folderForTarget(req, res, gd, req.body?.target);
+  if (!landed) return;
+  if (!landed.folderId) {
+    return res.status(409).json({ ok: false, error: { code: 'NO_DRIVE', message: 'Google Drive is not connected.' } });
+  }
+  try {
+    const moved = await gd.moveFile(req.ctx.tenantId, found.doc.fileId, landed.folderId);
+    const sharedId = await db.getSharedFolderId(req.ctx.tenantId).catch(() => '');
+    const scope = await db.scopeForFolder(req.ctx.tenantId, landed.folderId, sharedId);
+    await db.setDocumentFolder(found.doc.id, landed.folderId);
+    await db.setDocumentScope(found.doc.id, scope);
+    await db.enqueue(req.ctx.tenantId, found.doc.provider, found.doc.fileId);
+    pipeline.drainQueue().catch(() => {});
+    const labels = await db.scopeLabels(req.ctx.tenantId, [scope], { youRef: req.ctx.sub });
+    res.json({ ok: true, data: {
+      id: found.doc.id, title: found.doc.title, link: moved.link || found.doc.link,
+      scope, folderLabel: labels[scope] || '',
+    } });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 app.get('/api/status', reader(), async (req, res) => {
   const [connections, counts, pending] = await Promise.all([
     db.listConnections(req.ctx.tenantId),
@@ -507,7 +679,10 @@ app.get('/api/documents', reader(), async (req, res) => {
   const email = req.ctx.raw?.email || req.ctx.email || '';
   const master = await db.isMasterAdmin(tenantId, sub, email);
   const mineScope = db.scopesFor(sub)[1] || '';
-  const want = requestedScope(req.query.scope, { master, mine: mineScope });
+  // The caller's readable set, once: it answers "may they ask for this
+  // scope", "is their read revoked" and "which folders do they hold".
+  const held = master ? [] : await db.readableScopes(tenantId, sub);
+  const want = requestedScope(req.query.scope, { master, mine: mineScope, held });
   if (want === null) {
     // Same answer as a folder that does not exist — see actionable().
     return res.status(404).json({
@@ -515,17 +690,19 @@ app.get('/api/documents', reader(), async (req, res) => {
     });
   }
   // undefined -> the caller's own readable set (or everything, for a master).
-  const scopes = want !== undefined
-    ? [want]
-    : (master ? null : await db.readableScopes(tenantId, sub));
+  const scopes = want !== undefined ? [want] : (master ? null : held);
   // A member whose read was revoked has an EMPTY readable set, and asking for
   // their own folder by name must not sneak past that.
-  const revoked = !master && !(await db.readableScopes(tenantId, sub)).length;
+  const revoked = !master && !held.length;
   const [docs, canUpload] = await Promise.all([
     revoked ? [] : db.listDocuments(tenantId, { limit: Number(req.query.limit) || 100, scopes }),
     db.canUpload(tenantId, sub),
   ]);
   const mine = mineScope;   // 'member:<ref>', '' if no identity
+  const [groups, labels] = await Promise.all([
+    db.listGroups(tenantId, { forRef: master ? null : sub }),
+    db.scopeLabels(tenantId, docs.map((d) => d.scope), { youRef: sub }),
+  ]);
   res.json({
     ok: true,
     data: docs.map((d) => ({
@@ -534,6 +711,8 @@ app.get('/api/documents', reader(), async (req, res) => {
       owned: d.scope === mine,
       shared: d.scope === 'shared',
       // Who may act on this row, decided server-side.
+      group: db.isGroupScope(d.scope),
+      folderLabel: labels[d.scope] || '',
       canEdit: master || d.scope === mine,
     })),
     you: {
@@ -546,6 +725,13 @@ app.get('/api/documents', reader(), async (req, res) => {
       // the workspace.
       canShare: master || canUpload,
       scope: mine,
+      role: req.role,
+      // The shared folders this caller is in (every folder, for a master), so
+      // the UI never has to guess what it may show.
+      groups: groups.map((g) => ({
+        id: g.id, name: g.name, scope: g.scope, docCount: g.docCount,
+        memberCount: g.members.length, member: g.members.includes(sub),
+      })),
     },
   });
 });
@@ -642,8 +828,9 @@ app.get('/api/search', reader(), async (req, res) => {
     const master = await db.isMasterAdmin(req.ctx.tenantId, req.ctx.sub, email);
     const scopes = master ? null : await db.readableScopes(req.ctx.tenantId, req.ctx.sub);
     const hits = await search(req.ctx.tenantId, vec, Math.min(Number(req.query.limit) || 8, 20), scopes);
+    const labels = await db.scopeLabels(req.ctx.tenantId, hits.map((h) => h.scope), { youRef: req.ctx.sub });
     res.json({ ok: true, data: hits.map((h) => ({
-      ...h, downloadUrl: gdrive().downloadUrlFor(h.fileId) })) });
+      ...h, downloadUrl: gdrive().downloadUrlFor(h.fileId), folder: labels[h.scope] || '' })) });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
@@ -674,13 +861,11 @@ app.post('/api/upload', reader(), upload.single('file'), async (req, res) => {
     // "shared" puts it in the workspace folder everyone can see, anything else
     // is the uploader's own. Default stays private — a file that quietly went
     // workspace-wide because a field was missing is the wrong failure.
+    // 'shared', 'group:<id>' (a folder the caller is in), or the caller's own.
+    const landed = await folderForTarget(req, res, gd, req.body.target);
+    if (!landed) return;                           // answered: not their folder
+    const folderId = landed.folderId;
     const toShared = String(req.body.target || '').toLowerCase() === 'shared';
-    const folderId = toShared
-      ? await gd.ensureSharedFolder(req.ctx.tenantId)
-      : await gd.ensureMemberFolder(req.ctx.tenantId, {
-          employeeRef: req.ctx.sub,
-          email: req.ctx.raw?.email || req.ctx.email || '',
-        });
     const uploaded = await gd.uploadFile(req.ctx.tenantId, {
       name: req.file.originalname, mimeType: req.file.mimetype,
       buffer: req.file.buffer, parentId: folderId,

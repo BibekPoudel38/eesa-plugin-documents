@@ -66,12 +66,16 @@ export function page(title, bodyHtml) {
  *  defined there cannot be unit tested without starting a real server. This is
  *  a permission boundary; it has to be testable.
  */
-export function requestedScope(raw, { master = false, mine = '' } = {}) {
+export function requestedScope(raw, { master = false, mine = '', held = [] } = {}) {
   const want = String(raw || '').trim();
   if (!want) return undefined;
   if (master) return want;
   if (want === 'shared') return want;
   if (mine && want === mine) return want;
+  // A group folder the caller is in. `held` is the caller's readable set,
+  // derived server-side — so asking for someone else's group by id gets the
+  // same "no such folder" as a folder that does not exist.
+  if (Array.isArray(held) && held.includes(want)) return want;
   return null;
 }
 

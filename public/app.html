@@ -249,6 +249,23 @@
           </div>
         </div>
       </section>
+      <section id="view-groups" class="hide">
+        <div class="card">
+          <h3>New shared folder</h3>
+          <div class="muted">A folder a group of people read and upload to together. The assistant answers from it for its members only.</div>
+          <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+            <input id="newName" placeholder="Folder name, e.g. Restaurant rules" style="flex:1;min-width:200px;padding:8px 10px;border:1px solid var(--line,#ddd);border-radius:8px;font:inherit" />
+            <button class="btn primary" onclick="createGroup()">Create</button>
+          </div>
+          <div id="newMembers" style="margin-top:10px;display:flex;flex-wrap:wrap"></div>
+          <div class="note" id="newStatus"></div>
+        </div>
+        <div class="card">
+          <h3>Shared folders</h3>
+          <div class="muted">Who is in each one, and what is in it.</div>
+          <div id="groups" style="margin-top:12px"></div>
+        </div>
+      </section>
     </div>
 
     <div class="drop hide" id="drop">Drop to upload here</div>
@@ -310,6 +327,7 @@ function say(id, msg, kind) {
 // ---------------------------------------------------------------------------
 let YOU = { master:false, canUpload:true, canShare:true, employeeRef:'', email:'' };
 let TREE = { shared:{docCount:0}, folders:[] };
+let GROUPS = [];                     // shared group folders this caller may see
 let DOCS = [];
 let VIEW = 'files';                  // files | search | people
 let SCOPE = '';                      // '' = default set, 'shared', 'member:<ref>'
@@ -404,6 +422,12 @@ function renderNav() {
   if (!YOU.master && mineScope()) {
     h += navBtn(mineScope(), 'My folder', null, '📁');
   }
+  if (GROUPS.length) {
+    h += '<div class="navsec">Shared folders</div>';
+    for (const g of GROUPS) {
+      h += navBtn(g.scope, g.name + (g.member ? '' : ' (not in it)'), g.docCount, '🗃️');
+    }
+  }
   if (YOU.master && TREE.folders.length) {
     h += '<div class="navsec">People</div>';
     for (const f of TREE.folders) {
@@ -415,6 +439,13 @@ function renderNav() {
     h += '<button class="navitem" aria-current="' + (VIEW === 'people' ? 'true' : 'false')
        + '" onclick="showPeople()"><span class="ic">⚙️</span>'
        + '<span class="lbl">Access &amp; permissions</span></button>';
+  }
+  // Shared folders are managed by any Documents admin, not only a master.
+  if (YOU.master || YOU.role === 'admin') {
+    if (!(YOU.master && TREE.folders.length)) h += '<div class="navsec">Admin</div>';
+    h += '<button class="navitem" aria-current="' + (VIEW === 'groups' ? 'true' : 'false')
+       + '" onclick="showGroups()"><span class="ic">🗃️</span>'
+       + '<span class="lbl">Shared folders</span></button>';
   }
   $('nav').innerHTML = h;
 }
@@ -429,6 +460,13 @@ function go(scope) {
   loadFiles();
 }
 
+function showGroups() {
+  VIEW = 'groups';
+  $('side').classList.remove('open');
+  render();
+  renderGroups();
+}
+
 function showPeople() {
   VIEW = 'people';
   $('side').classList.remove('open');
@@ -440,6 +478,12 @@ function showPeople() {
 // browsing someone else's folder must never mistake it for their own.
 function crumbFor() {
   if (VIEW === 'people') return { t:'Access & permissions', s:'Who can read, upload, and see everything' };
+  if (VIEW === 'groups') return { t:'Shared folders', s:'Folders a group of people read and upload to together' };
+  if (SCOPE && SCOPE.startsWith('group:')) {
+    const g = GROUPS.find((x) => x.scope === SCOPE);
+    return { t:(g && g.name) || 'Shared folder',
+             s: g ? (g.memberCount + ' member' + (g.memberCount === 1 ? '' : 's') + ' can read these') : 'A shared folder' };
+  }
   if (VIEW === 'search') return { t:'Search', s:'Semantic search across everything you can read' };
   if (SCOPE === 'shared') return { t:'Shared', s:'Everyone in this workspace can read these' };
   if (SCOPE && SCOPE.startsWith('member:')) {
@@ -459,6 +503,7 @@ function render() {
   $('view-files').classList.toggle('hide', VIEW !== 'files');
   $('view-search').classList.toggle('hide', VIEW !== 'search');
   $('view-people').classList.toggle('hide', VIEW !== 'people');
+  $('view-groups').classList.toggle('hide', VIEW !== 'groups');
   $('viewBtn').textContent = LAYOUT === 'grid' ? '☰' : '▦';
   $('sort').value = SORT;
   $('sort').classList.toggle('hide', VIEW !== 'files');
@@ -475,15 +520,21 @@ function render() {
   } else {
     up.removeAttribute('aria-disabled');
     up.style.opacity = ''; up.style.pointerEvents = '';
-    up.title = t === 'shared' ? 'Uploads into Shared' : 'Uploads into your own folder';
+    up.title = t === 'shared' ? 'Uploads into Shared'
+      : t.startsWith('group:') ? 'Uploads into ' + ((GROUPS.find((g) => g.scope === t) || {}).name || 'this shared folder')
+      : 'Uploads into your own folder';
   }
   renderNav();
 }
 
-/** 'mine' | 'shared' | null (cannot upload here). */
+/** 'mine' | 'shared' | 'group:<id>' | null (cannot upload here). */
 function uploadTarget() {
   if (!YOU.canUpload) return null;
   if (SCOPE === 'shared') return 'shared';
+  if (SCOPE && SCOPE.startsWith('group:')) {
+    const g = GROUPS.find((x) => x.scope === SCOPE);
+    return (g && (g.member || YOU.master)) ? SCOPE : null;
+  }
   if (SCOPE && SCOPE.startsWith('member:') && SCOPE.slice(7) !== YOU.employeeRef) return null;
   return 'mine';
 }
@@ -532,6 +583,7 @@ function paintFiles() {
 }
 
 function whereOf(d) {
+  if (d.group) return d.folderLabel || 'Shared folder';
   if (d.shared) return 'Shared';
   if (d.owned) return 'My folder';
   const ref = String(d.scope || '').startsWith('member:') ? d.scope.slice(7) : '';
@@ -765,6 +817,104 @@ async function renderFolders() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// shared folders (Documents admins) — create one, choose who is in it.
+// ---------------------------------------------------------------------------
+let ROSTER = [];                     // members, for the checklists
+
+async function renderGroups() {
+  const host = $('groups');
+  if (!host) return;
+  try {
+    const [groups, members] = await Promise.all([api('/groups?archived=true'), api('/members')]);
+    GROUPS = (groups.data || []).filter((g) => !g.archived);
+    ROSTER = members.data || [];
+    const live = (groups.data || []).filter((g) => !g.archived);
+    const gone = (groups.data || []).filter((g) => g.archived);
+    let html = live.map(groupRow).join('');
+    if (!live.length) html = '<div class="empty"><b>No shared folders yet</b>Create one above and choose who is in it.</div>';
+    // Archived folders stay reachable (Restore) but out of the way: the list
+    // an admin scans should be the folders that are actually in use.
+    if (gone.length) {
+      html += '<details style="margin-top:12px"><summary class="muted" style="cursor:pointer">'
+        + gone.length + ' archived folder' + (gone.length === 1 ? '' : 's') + '</summary>'
+        + gone.map(groupRow).join('') + '</details>';
+    }
+    host.innerHTML = html;
+    $('newMembers').innerHTML = ROSTER.map((m) => memberPick('new', m, false)).join('');
+    renderNav();
+  } catch (e) {
+    host.innerHTML = '<div class="empty"><b>Shared folders unavailable</b>' + esc(e.message) + '</div>';
+  }
+}
+
+function memberPick(key, m, on) {
+  return '<label class="tg' + (on ? ' on' : '') + '" style="margin:2px 4px 2px 0">'
+    + '<input type="checkbox" value="' + esc(m.employeeRef) + '" ' + (on ? 'checked' : '')
+    + ' onchange="this.closest(\'.tg\').classList.toggle(\'on\', this.checked)" />'
+    + '<span>' + esc(m.name || m.email) + '</span></label>';
+}
+
+function groupRow(g) {
+  const who = g.members.map((ref) => {
+    const m = ROSTER.find((x) => x.employeeRef === ref);
+    return '<span class="pill">' + esc((m && (m.name || m.email)) || ref)
+      + (g.archived ? '' : ' <a href="#" title="Remove" onclick="groupPatch(\'' + esc(g.id) + '\',{remove:[\'' + esc(ref) + '\']});return false">&times;</a>')
+      + '</span>';
+  }).join(' ');
+  const others = ROSTER.filter((m) => !g.members.includes(m.employeeRef));
+  const addSel = (g.archived || !others.length) ? '' :
+    '<select onchange="if(this.value){groupPatch(\'' + esc(g.id) + '\',{add:[this.value]});}" style="margin-top:6px">'
+    + '<option value="">Add a person…</option>'
+    + others.map((m) => '<option value="' + esc(m.employeeRef) + '">' + esc(m.name || m.email) + '</option>').join('')
+    + '</select>';
+  return '<div class="prow" style="align-items:flex-start"><div style="min-width:0;flex:1">'
+    + '<b>' + esc(g.name) + '</b>' + (g.archived ? ' <span class="pill">archived</span>' : '')
+    + '<div class="muted" style="margin-top:4px">' + (who || 'Nobody in it yet') + '</div>'
+    + addSel
+    + '<div class="note" id="g-' + esc(g.id) + '"></div></div>'
+    + '<div class="acts">'
+    + '<span class="pill">' + g.docCount + ' file' + (g.docCount === 1 ? '' : 's') + '</span>'
+    + (g.archived
+        ? '<button class="btn" onclick="groupPatch(\'' + esc(g.id) + '\',{archived:false})">Restore</button>'
+        : '<button class="btn" onclick="go(\'' + esc(g.scope) + '\')">Open</button>'
+          + '<button class="btn" onclick="groupRename(\'' + esc(g.id) + '\',\'' + esc(g.name).replace(/'/g, '&#39;') + '\')">Rename</button>'
+          + '<button class="btn" onclick="if(confirm(\'Archive this folder? Members lose access until it is restored; the files stay in Drive.\'))groupPatch(\'' + esc(g.id) + '\',{archived:true})">Archive</button>')
+    + '</div></div>';
+}
+
+async function createGroup() {
+  const name = $('newName').value.trim();
+  if (!name) { say('newStatus', 'Give the folder a name.', 'err'); return; }
+  const members = [...document.querySelectorAll('#newMembers input:checked')].map((i) => i.value);
+  say('newStatus', 'Creating…');
+  try {
+    const out = await api('/groups', { method: 'POST', body: JSON.stringify({ name, members }) });
+    $('newName').value = '';
+    say('newStatus', 'Created “' + name + '”' + (out.unknown && out.unknown.length ? ' — could not add: ' + out.unknown.join(', ') : ''), 'ok');
+    await renderGroups();
+    loadTree();
+  } catch (e) {
+    say('newStatus', 'Could not create it: ' + e.message, 'err');
+  }
+}
+
+async function groupPatch(id, body) {
+  try {
+    const out = await api('/groups/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify(body) });
+    if (out.unknown && out.unknown.length) say('g-' + id, 'Not a Documents member: ' + out.unknown.join(', '), 'err');
+    await renderGroups();
+    loadTree();
+  } catch (e) {
+    say('g-' + id, 'Could not change that: ' + e.message, 'err');
+  }
+}
+
+function groupRename(id, current) {
+  const name = prompt('New name for this folder', current);
+  if (name && name.trim() && name.trim() !== current) groupPatch(id, { name: name.trim() });
+}
+
 function prow(title, sub, count, isShared) {
   return '<div class="prow"><div style="min-width:0"><b>' + esc(title) + '</b>'
     + '<div class="muted">' + esc(sub) + '</div></div>'
@@ -834,6 +984,7 @@ async function loadTree() {
   try {
     const { data } = await api('/folders');
     TREE = { shared: data.shared || { docCount: 0 }, folders: data.folders || [] };
+    try { GROUPS = (await api('/groups')).data || []; } catch (e) { GROUPS = []; }
     renderNav();
   } catch (e) { /* sidebar just shows less */ }
 }
