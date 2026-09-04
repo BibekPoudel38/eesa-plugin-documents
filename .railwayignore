@@ -1,0 +1,4 @@
+node_modules
+.git
+.fastembed_cache
+local_cache
