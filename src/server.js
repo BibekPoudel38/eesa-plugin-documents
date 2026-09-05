@@ -15,6 +15,7 @@ import * as db from './db.js';
 import * as pipeline from './pipeline.js';
 import { getProvider, listProviders, isSupported } from './providers/index.js';
 import { handleRpc } from './mcp.js';
+import { telemetry } from './telemetry.js';
 // esc/page/state live in web.js so they can be unit tested: this module calls
 // app.listen() at import, so nothing defined here is reachable from a test.
 import { esc, page, makeState, readState, requestedScope, publishOnUpload } from './web.js';
@@ -51,6 +52,14 @@ const serverInfo = { name: MANIFEST.slug, version: MANIFEST.version };
 const MAX_BYTES = Number(process.env.INGEST_MAX_FILE_MB || 25) * 1024 * 1024;
 
 const app = express();
+
+// This plugin's own access log, shipped to Eesa. Registered FIRST so it sees
+// every request, including the ones a later handler rejects — a 401 storm is a
+// finding, and a middleware mounted after the auth gate would never record one.
+//
+// Off entirely without PLUGIN_GATEWAY_SECRET, so a fork or a local run sends
+// nothing anywhere.
+app.use(telemetry());
 app.use(express.json({ limit: '2mb' }));
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_BYTES } });
 
